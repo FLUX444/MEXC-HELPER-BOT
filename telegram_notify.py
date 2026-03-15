@@ -250,12 +250,12 @@ async def send_market_mover_alert(symbol: str, rise_pct: float, volume24: float,
     display = symbol.replace("_", "")
     link = _market_mover_link(symbol)
     text = (
-        f"📊 <b>Маркет-муверы</b>\n\n"
+        f"📊 <b>Маркет-муверы</b> — рост цены и высокий объём\n\n"
         f"🪙 <a href=\"{link}\">#{display} USDT</a> Бессрочный\n"
         f"📈 Изменение 24ч: <b>+{rise_pct:.2f}%</b>\n"
         f"💰 Цена: {price}\n"
         f"📦 Объём 24h: {volume24:,.0f}\n\n"
-        f"Легкий рост, высокий объём"
+        f"Рост цены и высокий объём"
     )
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
     try:

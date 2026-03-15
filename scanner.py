@@ -79,10 +79,11 @@ async def on_kline(data: dict, symbol: str, ctx: dict) -> None:
                 "SIGNAL %s [%s] RSI=%.2f price=%.4g latency=%.0fms",
                 symbol, tf_name, rsi_val, close, (time.perf_counter() - t0) * 1000,
             )
-    if ctx.get("log_every_n"):
+    log_every = ctx.get("log_every_n")
+    if log_every:
         ctx["log_n"] = (ctx.get("log_n") or 0) + 1
-        if ctx["log_n"] % 5000 == 0:
-            logger.info("Processed %d kline updates", ctx["log_n"])
+        if ctx["log_n"] % log_every == 0:
+            logger.info("RSI scan %s: обработано %d обновлений свечей", ctx["tf_name"], ctx["log_n"])
 
 
 async def bootstrap_symbols_for_tf(
@@ -140,12 +141,17 @@ async def main() -> None:
         await bootstrap_symbols_for_tf(session, store, symbols, interval="Hour4", tf_name="4H")
 
     # Запускаем два WebSocket‑потока: 1H и 4H
-    ctx_1h = {"store": store, "log_every_n": True, "tf_name": "1H", "threshold": RSI_THRESHOLD_1H}
-    ctx_4h = {"store": store, "log_every_n": False, "tf_name": "4H", "threshold": RSI_THRESHOLD_4H}
+    ctx_1h = {"store": store, "log_every_n": 5000, "tf_name": "1H", "threshold": RSI_THRESHOLD_1H}
+    ctx_4h = {"store": store, "log_every_n": 10000, "tf_name": "4H", "threshold": RSI_THRESHOLD_4H}
 
     ws_1h = asyncio.create_task(run_ws_kline_stream(symbols, on_kline, ctx_1h, interval="Min60", reconnect_delay=5.0))
     ws_4h = asyncio.create_task(run_ws_kline_stream(symbols, on_kline, ctx_4h, interval="Hour4", reconnect_delay=5.0))
     tasks = [ws_1h, ws_4h]
+    logger.info(
+        "RSI: сканирование запущено — 1H (порог ≥%.0f) и 4H (порог ≥%.0f) по %d парам. "
+        "Уведомления в Telegram при достижении порога.",
+        RSI_THRESHOLD_1H, RSI_THRESHOLD_4H, len(symbols),
+    )
 
     # Маркет-муверы по API MEXC (WebSocket push.tickers) — в отдельный канал
     ticker_store: dict[str, dict] = {}
@@ -162,7 +168,7 @@ async def main() -> None:
             await asyncio.sleep(MARKET_MOVERS_INTERVAL_SEC)
             if not MARKET_MOVERS_CHAT_ID or not ticker_store:
                 continue
-            # Рост цены >= min_rise%, только USDT, сортировка по объёму 24h
+            # Фильтр как на MEXC: «Рост цены и высокий объём» — рост 24ч >= min_rise%, объём 24h > 0, только USDT
             candidates = [
                 (sym, t)
                 for sym, t in ticker_store.items()
@@ -171,12 +177,12 @@ async def main() -> None:
                 and (t.get("volume24") or 0) > 0
             ]
             candidates.sort(key=lambda x: float(x[1].get("volume24") or 0), reverse=True)
-            top = candidates[:MARKET_MOVERS_TOP_N]
+            top = candidates[:MARKET_MOVERS_TOP_N]  # топ по объёму = высокий объём
             if not top:
                 continue
             now = time.time()
             sent_this_cycle = 0
-            # Каждое «новое» предложение (пара впервые за cooldown) — отдельное сообщение со ссылкой
+            # Только самые новые: пара впервые за cooldown попала в фильтр — одно уведомление в канал со ссылкой
             for sym, t in top:
                 if sent_this_cycle >= MARKET_MOVERS_MAX_PER_CYCLE:
                     break
@@ -194,7 +200,7 @@ async def main() -> None:
                     await asyncio.sleep(MARKET_MOVERS_ALERT_DELAY_SEC)
 
     if MARKET_MOVERS_CHAT_ID:
-        logger.info("Маркет-муверы: канал %s, только новые появления со ссылкой (проверка раз в %s сек, cooldown %s сек)",
+        logger.info("Маркет-муверы: фильтр «рост цены и высокий объём», только новые в канал %s (раз в %s сек, cooldown %s сек)",
                     MARKET_MOVERS_CHAT_ID, MARKET_MOVERS_INTERVAL_SEC, MARKET_MOVERS_NEW_COOLDOWN_SEC)
         tasks.append(asyncio.create_task(run_ws_ticker_stream(on_tickers, ticker_store, reconnect_delay=5.0)))
         tasks.append(asyncio.create_task(market_movers_loop()))

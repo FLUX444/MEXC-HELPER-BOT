@@ -13,10 +13,10 @@ scanner:
   kline_batch: 3           # Параллельных запросов (MEXC лимит ~10/с; больше — 510)
   kline_delay: 0.35        # Секунд паузы между запросами истории
   ws_ping_interval: 15     # Секунды между ping по WebSocket
-  # Маркет-муверы по API MEXC (WebSocket push.tickers) — в канал market_movers_chat_id
-  market_movers_interval_sec: 120   # Как часто слать сводку (сек)
-  market_movers_min_rise_pct: 5.0  # Минимальный рост цены 24h (%)
-  market_movers_top_n: 25          # Топ по объёму 24h
+  # Маркет-муверы: фильтр «Рост цены и высокий объём» (как на MEXC), только новые — в канал
+  market_movers_interval_sec: 120   # Как часто проверять (сек)
+  market_movers_min_rise_pct: 5.0  # Минимальный рост цены 24h (%) — рост цены
+  market_movers_top_n: 25          # Топ по объёму 24h — высокий объём
   market_movers_new_cooldown_sec: 1800  # Не слать одну и ту же пару чаще чем раз в 30 мин (каждое «новое предложение»)
   market_movers_alert_delay_sec: 4     # Пауза между отправками (чтобы не сработал Flood control Telegram)
   market_movers_max_per_cycle: 5        # Макс. алертов за один цикл (остальные — в следующий цикл)
