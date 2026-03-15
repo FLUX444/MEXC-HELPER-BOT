@@ -127,6 +127,36 @@ sudo systemctl start mexc-scanner
 
 После запуска (Docker или systemd) бот сразу пришлёт в Telegram сообщение о старте. Дальше сигналы RSI ≥ 85 будут приходить в тот же чат автоматически.
 
+### Обновление на сервере через Git
+
+Чтобы не перекидывать файлы по SFTP при каждом изменении кода:
+
+1. **Локально (у себя):** создай репозиторий на GitHub/GitLab (приватный при желании), добавь remote и запушь:
+   ```bash
+   git remote add origin https://github.com/ТВОЙ_АККАУНТ/MEX.git
+   git push -u origin main
+   ```
+2. **На сервере (первый раз):** клонируй репозиторий, настрой окружение и `config/keys.yml`:
+   ```bash
+   cd /root/programms
+   git clone https://github.com/ТВОЙ_АККАУНТ/MEX.git MEXC
+   cd MEXC
+   cp config/keys.example.yml config/keys.yml
+   # отредактируй config/keys.yml (токен, chat_id, SQLite/Redis)
+   python3 -m venv .venv && source .venv/bin/activate
+   pip install -r requirements.txt
+   mkdir -p data
+   # настрой и запусти systemd (см. Вариант Б выше)
+   ```
+3. **При обновлении кода:** локально делаешь коммиты и `git push`; на сервере просто подтягиваешь и перезапускаешь:
+   ```bash
+   cd /root/programms/MEXC
+   git pull
+   sudo systemctl restart mexc-scanner
+   ```
+
+Файлы `config/keys.yml` и папка `data/` в Git не попадают (см. `.gitignore`), поэтому на сервере они не перезатрутся при `git pull`.
+
 ---
 
 ## Как это работает

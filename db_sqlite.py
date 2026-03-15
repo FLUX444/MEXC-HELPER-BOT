@@ -17,7 +17,8 @@ LAST_SIGNALS_MAX = 20
 
 def _init_conn(path: str) -> sqlite3.Connection:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    # check_same_thread=False: соединение передаётся в asyncio.to_thread(), нужен доступ из других потоков
+    conn = sqlite3.connect(path, check_same_thread=False)
     conn.execute(
         f"CREATE TABLE IF NOT EXISTS {ALERTS_TABLE} (symbol TEXT, candle_start INTEGER, PRIMARY KEY (symbol, candle_start))"
     )
