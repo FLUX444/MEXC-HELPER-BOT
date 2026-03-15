@@ -1,9 +1,8 @@
 """
-Main RSI scanner: load history, run WebSocket(s), on each kline update compute RSI(24).
-Two timeframes:
-- 1H  (Min60)  — сигнал в реальном времени при RSI >= 90 (задержка 1 мин от открытия свечи).
-- 4H  (Hour4) — сигнал в реальном времени при RSI >= 85 (задержка 5 мин от открытия, чтобы RSI совпадал с графиком).
-Для каждой монеты и каждого таймфрейма — не больше одного сигнала на свечу.
+Сканер RSI3(24) и маркет-муверы (асинхронно).
+- 1H и 4H: RSI по текущей (открытой) свече, которая формируется. Сигнал строго если RSI3(24) >= 90.
+- Маркет-муверы: только «Рост цены и высокий объём», уведомление при появлении новой пары.
+Антиспам: symbol + timeframe + candle_open_time (один раз на свечу).
 """
 from __future__ import annotations
 
@@ -38,31 +37,35 @@ logger = logging.getLogger(__name__)
 
 
 async def on_kline(data: dict, symbol: str, ctx: dict) -> None:
-    """Handle one push.kline: update state, compute RSI, maybe send alert."""
+    """
+    Обработка push.kline: RSI3(24) по текущей (открытой) свече.
+    Уведомление только если RSI3(24) >= 90 (строго). Один раз на свечу: symbol + timeframe + candle_open_time.
+    """
     store: StateStore = ctx["store"]
-    tf_name: str = ctx["tf_name"]  # "1H" или "4H"
+    tf_name: str = ctx["tf_name"]
     threshold: float = ctx["threshold"]
     t_sec = int(data.get("t", 0))
     close = float(data.get("c", 0))
     if not t_sec or not close:
         return
-    # Отдельное состояние для каждой пары+таймфрейма
     state_key = f"{symbol}@{tf_name}"
     state = store.get_or_create(state_key)
-    # Новая свеча?
+
     if state.candle_start_time and t_sec != state.candle_start_time:
         state.roll_to_new_candle(close, t_sec)
     else:
         if not state.candle_start_time:
             state.candle_start_time = t_sec
         state.current_close = close
+
+    # RSI по текущей формирующейся свече (последние 25 цен: 24 закрытых + текущая)
     closes = state.closes_for_rsi()
     if len(closes) < RSI_PERIOD + 1:
         return
     rsi_val = rsi(closes, RSI_PERIOD)
     if rsi_val is None:
         return
-    # Не слать в первые минуты свечи — первый тик даёт всплеск, не совпадающий с графиком MEXC
+    # Не слать в первые секунды свечи — первый тик даёт всплеск, не совпадающий с графиком MEXC
     now_sec = int(time.time())
     elapsed = now_sec - state.candle_start_time
     min_delay = MIN_ALERT_DELAY_4H_SEC if tf_name == "4H" else MIN_ALERT_DELAY_1H_SEC
@@ -70,15 +73,12 @@ async def on_kline(data: dict, symbol: str, ctx: dict) -> None:
         return
     already_sent = await store.get_alert_sent(state_key, state.candle_start_time)
     if rsi_val >= threshold and not already_sent:
-        t0 = time.perf_counter()
         ok = await send_signal(symbol, rsi_val, close, state.candle_start_time, tf_name=tf_name)
         if ok:
             await store.set_alert_sent(state_key, state.candle_start_time)
             await store.push_last_signal(symbol, rsi_val, close, state.candle_start_time, tf_name=tf_name)
-            logger.info(
-                "SIGNAL %s [%s] RSI=%.2f price=%.4g latency=%.0fms",
-                symbol, tf_name, rsi_val, close, (time.perf_counter() - t0) * 1000,
-            )
+            logger.info("SIGNAL %s [%s] RSI3(24)=%.2f (открытая свеча) price=%.4g", symbol, tf_name, rsi_val, close)
+
     log_every = ctx.get("log_every_n")
     if log_every:
         ctx["log_n"] = (ctx.get("log_n") or 0) + 1

@@ -85,8 +85,7 @@ MEXC_KLINE_DELAY = float(_scanner.get("kline_delay") or 0.35)
 # Всегда RSI3(24) для совпадения с графиком MEXC; иное значение из конфига не используется
 RSI_PERIOD = 24
 RSI_THRESHOLD_1H = float(_scanner.get("rsi_threshold_1h") or 90.0)
-RSI_THRESHOLD_4H = float(_scanner.get("rsi_threshold_4h") or 85.0)
-# Задержка перед отправкой (сек); 0 = сразу как RSI достиг порога (можно ставить 15–30 для сглаживания первого тика)
+RSI_THRESHOLD_4H = float(_scanner.get("rsi_threshold_4h") or 90.0)
 MIN_ALERT_DELAY_1H_SEC = max(0, int(_scanner.get("min_alert_delay_1h_sec") or 30))
 MIN_ALERT_DELAY_4H_SEC = max(0, int(_scanner.get("min_alert_delay_4h_sec") or 60))
 KLINE_HISTORY_COUNT = int(_scanner.get("kline_history_count") or 30)

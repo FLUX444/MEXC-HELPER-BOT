@@ -1,4 +1,4 @@
-"""Telegram notifications for RSI >= 85 signals. Тексты из config/messages.yml. Aiogram."""
+"""Telegram notifications: RSI3(24) >= 90 (по закрытой свече), маркет-муверы. Тексты из config/messages.yml. Aiogram."""
 from __future__ import annotations
 
 import logging
@@ -84,46 +84,33 @@ def build_message(
     *,
     tf_name: str | None = None,
 ) -> str:
-    """Текст сигнала в HTML: название монеты — кликабельная ссылка на MEXC, с указанием таймфрейма."""
+    """Формат по ТЗ: RSI3(24) по открытой свече, «Свеча открыта», «Свеча формируется», ссылка."""
     cfg = _msg_cfg()
-    title = cfg.get("title") or "🚨 REAL-TIME RSI SIGNAL (MEXC Futures)"
+    title = cfg.get("title") or "🚨 REAL-TIME RSI SIGNAL"
     coin_label = cfg.get("coin_label") or "Монета"
-    rsi_label = cfg.get("rsi_label") or "RSI (24)"
-    condition_label = cfg.get("condition_label") or "Условие"
-    # Текст условия зависит от таймфрейма
-    if tf_name == "1H":
-        condition_value = "RSI ≥ 90"
-    elif tf_name == "4H":
-        condition_value = "RSI ≥ 85"
-    else:
-        condition_value = cfg.get("condition_value") or "RSI ≥ 85"
+    rsi_label = cfg.get("rsi_label") or "RSI3(24)"
     price_label = cfg.get("price_label") or "Цена"
     price_suffix = cfg.get("price_suffix") or "USDT"
-    candle_start_label = cfg.get("candle_start_label") or "Начало свечи"
-    time_after_open_label = cfg.get("time_after_open_label") or "Время после открытия"
-    time_after_open_suffix = cfg.get("time_after_open_suffix") or "мин"
+    candle_open_label = cfg.get("candle_start_label") or "Свеча открыта"
 
     display_symbol = symbol.replace("_", "")
-    # Добавим параметр таймфрейма в ссылку, если он есть (на стороне MEXC он может игнорироваться, но вреда не будет)
     if tf_name:
         link = f"{MEXC_FUTURES_URL}{symbol}?interval={tf_name}"
     else:
         link = MEXC_FUTURES_URL + symbol
     coin_link = f'<a href="{link}">#{display_symbol}</a>'
-    now_sec = int(time.time())
-    elapsed_min = (now_sec - candle_start_sec) // 60
 
-    tf_line = f"⏲ Таймфрейм: <b>{tf_name}</b>\n" if tf_name else ""
+    tf_line = f"Таймфрейм: <b>{tf_name}</b>\n\n" if tf_name else ""
 
     return (
         f"{title}\n\n"
-        f"🪙 {coin_label}: {coin_link}\n"
-        f"📈 {rsi_label}: <b>{rsi_value:.2f}</b>\n"
-        f"✅ {condition_label}: {condition_value}\n"
-        f"{tf_line}\n"
+        f"{coin_label}: {coin_link}\n"
+        f"{rsi_label}: <b>{rsi_value:.2f}</b>\n"
+        f"{tf_line}"
         f"💰 {price_label}: <b>{price:.4g}</b> {price_suffix}\n\n"
-        f"🕐 {candle_start_label}: {_fmt_utc(candle_start_sec)}\n"
-        f"⏱ {time_after_open_label}: {elapsed_min} {time_after_open_suffix}"
+        f"🕐 {candle_open_label}: {_fmt_utc(candle_start_sec)} UTC\n"
+        f"Свеча формируется\n\n"
+        f"🔗 {link}"
     )
 
 
@@ -145,7 +132,7 @@ async def send_startup_message() -> bool:
     if not TELEGRAM_BOT_TOKEN or chat_id is None:
         return False
     cfg = (MESSAGES or {}).get("startup") or {}
-    text = cfg.get("text") or "✅ MEXC RSI Scanner запущен 24/7. Ожидаю сигналы RSI(24): 1H ≥ 90, 4H ≥ 85."
+    text = cfg.get("text") or "✅ MEXC RSI Scanner запущен 24/7. RSI3(24) по открытой свече: 1H и 4H при ≥ 90. Маркет-муверы: только «Рост цены и высокий объём»."
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
     header_path = _get_header_path()
     try:
@@ -250,12 +237,11 @@ async def send_market_mover_alert(symbol: str, rise_pct: float, volume24: float,
     display = symbol.replace("_", "")
     link = _market_mover_link(symbol)
     text = (
-        f"📊 <b>Маркет-муверы</b> — рост цены и высокий объём\n\n"
-        f"🪙 <a href=\"{link}\">#{display} USDT</a> Бессрочный\n"
-        f"📈 Изменение 24ч: <b>+{rise_pct:.2f}%</b>\n"
-        f"💰 Цена: {price}\n"
-        f"📦 Объём 24h: {volume24:,.0f}\n\n"
-        f"Рост цены и высокий объём"
+        f"📈 <b>MARKET MOVER</b>\n\n"
+        f"Монета: <a href=\"{link}\">#{display} USDT</a> Бессрочный\n"
+        f"Рост: <b>+{rise_pct:.2f}%</b>\n\n"
+        f"Высокий объём торгов\n\n"
+        f"🔗 {link}"
     )
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
     try:

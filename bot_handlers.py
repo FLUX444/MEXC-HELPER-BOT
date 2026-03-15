@@ -124,10 +124,10 @@ async def _last_signals_text_from_store(store) -> str:
     try:
         raw = await store.get_last_signals(10)
         if not raw:
-            return "📭 <b>Последних уведомлений пока нет.</b>\n\nСигналы появятся при RSI ≥ 85."
+            return "📭 <b>Последних уведомлений пока нет.</b>\n\nСигналы появятся при RSI3(24) ≥ 90 (по закрытой свече)."
         first_ts = raw[0].get("ts", 0) if raw else 0
         ago = _format_last_signal_ago(first_ts)
-        header = "📋 <b>Последние уведомления (RSI ≥ 85)</b>\n"
+        header = "📋 <b>Последние уведомления (RSI3(24) ≥ 90)</b>\n"
         if ago:
             header += f"⏱ Последнее: <b>{ago}</b>\n\n"
         lines = [header]
@@ -192,14 +192,14 @@ async def _last_signals_text(redis) -> str:
         key = "mexc:last_signals"
         raw = await redis.lrange(key, 0, 9)
         if not raw:
-            return "📭 <b>Последних уведомлений пока нет.</b>\n\nСигналы появятся при RSI ≥ 85."
+            return "📭 <b>Последних уведомлений пока нет.</b>\n\nСигналы появятся при RSI3(24) ≥ 90 (по закрытой свече)."
         first_ts = 0
         try:
             first_ts = json.loads(raw[0]).get("ts", 0) if raw else 0
         except Exception:
             pass
         ago = _format_last_signal_ago(first_ts)
-        header = "📋 <b>Последние уведомления (RSI ≥ 85)</b>\n"
+        header = "📋 <b>Последние уведомления (RSI3(24) ≥ 90)</b>\n"
         if ago:
             header += f"⏱ Последнее: <b>{ago}</b>\n\n"
         lines = [header]
@@ -226,7 +226,7 @@ def _get_welcome_text() -> str:
     cfg = (MESSAGES or {}).get("welcome") or {}
     return cfg.get("text") or (
         "👋 Добро пожаловать!\n\n"
-        "📊 Я сканирую все USDT-фьючерсы MEXC в реальном времени и присылаю сигнал, когда RSI(24) на 1H достигает 85 и выше.\n\n"
+        "📊 RSI3(24) по закрытой свече: 1H и 4H при ≥ 90. Маркет-муверы: только «Рост цены и высокий объём».\n\n"
         "🔔 Нажми на кнопки ниже — последние уведомления и просмотр БД."
     )
 
