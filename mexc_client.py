@@ -208,3 +208,54 @@ async def run_ws_kline_stream(
         except Exception as e:
             logger.warning("WebSocket error: %s", e)
         await asyncio.sleep(reconnect_delay)
+
+
+def ws_subscribe_tickers() -> dict:
+    """Подписка на тикеры всех контрактов (volume24, riseFallRate и т.д.)."""
+    return {"method": "sub.tickers", "param": {}, "gzip": False}
+
+
+async def run_ws_ticker_stream(
+    on_tickers_cb: Any,
+    ticker_ctx: Any = None,
+    *,
+    reconnect_delay: float = 5.0,
+) -> None:
+    """
+    Подключается к MEXC WS, подписка на sub.tickers.
+    При каждом push.tickers вызывает on_tickers_cb(data_list, ticker_ctx).
+    data_list — список словарей {symbol, volume24, riseFallRate, lastPrice, ...}.
+    """
+    while True:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.ws_connect(MEXC_WS_URL) as ws:
+                    await ws.send_str(json.dumps(ws_subscribe_tickers()))
+                    logger.info("WebSocket tickers subscribed")
+                    last_ping = time.monotonic()
+                    async for msg in ws:
+                        if msg.type == aiohttp.WSMsgType.CLOSED:
+                            break
+                        if msg.type == aiohttp.WSMsgType.ERROR:
+                            raise ConnectionError(ws.exception())
+                        if msg.type != aiohttp.WSMsgType.TEXT:
+                            continue
+                        try:
+                            obj = json.loads(msg.data)
+                        except json.JSONDecodeError:
+                            continue
+                        if obj.get("channel") == "pong":
+                            pass
+                        elif obj.get("channel") == "push.tickers":
+                            data = obj.get("data")
+                            if isinstance(data, list) and data:
+                                await on_tickers_cb(data, ticker_ctx)
+                        now = time.monotonic()
+                        if now - last_ping >= WS_PING_INTERVAL:
+                            await ws.send_str(json.dumps(ws_ping()))
+                            last_ping = now
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning("WebSocket tickers error: %s", e)
+        await asyncio.sleep(reconnect_delay)

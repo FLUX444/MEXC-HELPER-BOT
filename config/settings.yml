@@ -5,10 +5,18 @@ scanner:
   # Пороги для разных таймфреймов
   rsi_threshold_1h: 90.0   # 1H: сигнал при RSI >= 90
   rsi_threshold_4h: 85.0   # 4H: сигнал при RSI >= 85
+  # Не отправлять сигнал в первые N секунд свечи (чтобы RSI совпадал с графиком MEXC, не первый тик)
+  min_alert_delay_1h_sec: 120  # 1H: ждать 2 мин (на 0 мин RSI от первого тика не совпадает с графиком MEXC)
+  min_alert_delay_4h_sec: 150  # 4H: ждать 2.5 мин после открытия свечи
   kline_history_count: 30
   kline_batch: 3           # Параллельных запросов (MEXC лимит ~10/с; больше — 510)
   kline_delay: 0.35        # Секунд паузы между запросами истории
   ws_ping_interval: 15     # Секунды между ping по WebSocket
+  # Маркет-муверы по API MEXC (WebSocket push.tickers) — в канал market_movers_chat_id
+  market_movers_interval_sec: 120   # Как часто слать сводку (сек)
+  market_movers_min_rise_pct: 5.0  # Минимальный рост цены 24h (%)
+  market_movers_top_n: 25          # Топ по объёму 24h
+  market_movers_new_cooldown_sec: 1800  # Не слать одну и ту же пару чаще чем раз в 30 мин (каждое «новое предложение»)
 
 mexc:
   rest_base: "https://api.mexc.com"

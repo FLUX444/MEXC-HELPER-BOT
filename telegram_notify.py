@@ -10,7 +10,7 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import FSInputFile
 
-from config import BASE_DIR, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, MESSAGES
+from config import BASE_DIR, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, MESSAGES, MARKET_MOVERS_CHAT_ID
 
 logger = logging.getLogger(__name__)
 
@@ -231,5 +231,74 @@ async def send_test_signal() -> tuple[bool, str]:
     except Exception as e:
         logger.exception("Test signal failed: %s", e)
         return False, ""
+    finally:
+        await bot.session.close()
+
+
+def _market_mover_link(symbol: str) -> str:
+    """Ссылка на пару фьючерсов MEXC."""
+    return f"{MEXC_FUTURES_URL}{symbol}"
+
+
+async def send_market_mover_alert(symbol: str, rise_pct: float, volume24: float, price: float) -> bool:
+    """
+    Отправляет одно уведомление «новое предложение» маркет-муверов в канал — с ссылкой на пару.
+    """
+    chat_id = _parse_chat_id(MARKET_MOVERS_CHAT_ID or "")
+    if not TELEGRAM_BOT_TOKEN or not chat_id:
+        return False
+    display = symbol.replace("_", "")
+    link = _market_mover_link(symbol)
+    text = (
+        f"📊 <b>Маркет-муверы</b>\n\n"
+        f"🪙 <a href=\"{link}\">#{display} USDT</a> Бессрочный\n"
+        f"📈 Изменение 24ч: <b>+{rise_pct:.2f}%</b>\n"
+        f"💰 Цена: {price}\n"
+        f"📦 Объём 24h: {volume24:,.0f}\n\n"
+        f"Легкий рост, высокий объём"
+    )
+    bot = Bot(token=TELEGRAM_BOT_TOKEN)
+    try:
+        from aiogram.enums import ParseMode
+        await bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+        return True
+    except TelegramBadRequest as e:
+        if "chat not found" in (e.message or "").lower():
+            _log_chat_not_found()
+        else:
+            logger.warning("Market mover alert send failed: %s", e)
+        return False
+    except Exception as e:
+        logger.exception("Market mover alert send failed: %s", e)
+        return False
+    finally:
+        await bot.session.close()
+
+
+async def send_market_movers(movers_lines: list[str]) -> bool:
+    """
+    Отправляет сводку «Маркет-муверы» (рост цены + высокий объём) в канал market_movers_chat_id.
+    movers_lines — список строк (каждая — одна пара/событие).
+    """
+    chat_id = _parse_chat_id(MARKET_MOVERS_CHAT_ID or "")
+    if not TELEGRAM_BOT_TOKEN or not chat_id or not movers_lines:
+        return False
+    text = "📊 <b>Маркет-муверы</b> (рост цены и высокий объём)\n\n" + "\n\n".join(movers_lines)
+    if len(text) > 4000:
+        text = text[:3997] + "..."
+    bot = Bot(token=TELEGRAM_BOT_TOKEN)
+    try:
+        from aiogram.enums import ParseMode
+        await bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+        return True
+    except TelegramBadRequest as e:
+        if "chat not found" in (e.message or "").lower():
+            _log_chat_not_found()
+        else:
+            logger.warning("Market movers send failed: %s", e)
+        return False
+    except Exception as e:
+        logger.exception("Market movers send failed: %s", e)
+        return False
     finally:
         await bot.session.close()

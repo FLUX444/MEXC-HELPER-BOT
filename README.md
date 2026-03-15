@@ -37,6 +37,8 @@
 telegram:
   bot_token: "..."
   chat_id: "123456789"
+  # Канал для маркет-муверов (сводки + новые предложения со ссылками). Вставь свой ID или оставь пустым.
+  market_movers_chat_id: ""   # например -1003829455006; узнать: переслать пост из канала в @getidsbot
 
 db:
   use_redis: true        # true = Redis (при localhost бот поднимет Docker сам), false = SQLite
@@ -45,7 +47,8 @@ db:
 ```
 
 **Chat ID** узнать: напишите боту в Telegram, затем откройте  
-`https://api.telegram.org/bot<ВАШ_ТОКЕН>/getUpdates` — в ответе будет `message.chat.id`.
+`https://api.telegram.org/bot<ВАШ_ТОКЕН>/getUpdates` — в ответе будет `message.chat.id`.  
+**ID канала** (для маркет-муверов): переслать любое сообщение из канала боту **@getidsbot**.
 
 ### Редактирование сообщений
 
@@ -148,11 +151,22 @@ sudo systemctl start mexc-scanner
    mkdir -p data
    # настрой и запусти systemd (см. Вариант Б выше)
    ```
-3. **При обновлении кода:** локально делаешь коммиты и `git push`; на сервере просто подтягиваешь и перезапускаешь:
+3. **При обновлении кода:** локально делаешь коммиты и `git push`; на сервере подтяни код и перезапусти сервис.
+
+   **Команда для обновления бота на сервере** (выполни по SSH в каталоге проекта или одной строкой с ПК):
+
    ```bash
-   cd /root/programms/MEXC
-   git pull
-   sudo systemctl restart mexc-scanner
+   cd /root/programms/MEXC && git pull && sudo systemctl restart mexc-scanner && echo OK
+   ```
+
+   Или через скрипт (на сервере):
+   ```bash
+   cd /root/programms/MEXC && ./scripts/update_on_server.sh
+   ```
+
+   С локального ПК одной командой (подставь свой хост):
+   ```bash
+   ssh root@ТВОЙ_СЕРВЕР "cd /root/programms/MEXC && git pull && sudo systemctl restart mexc-scanner && echo OK"
    ```
 
 Файлы `config/keys.yml` и папка `data/` в Git не попадают (см. `.gitignore`), поэтому на сервере они не перезатрутся при `git pull`.

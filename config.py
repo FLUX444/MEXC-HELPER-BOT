@@ -54,6 +54,10 @@ _db_cfg = _keys.get("db") or {}
 
 TELEGRAM_BOT_TOKEN = (_telegram.get("bot_token") or "").strip() or os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = str(_telegram.get("chat_id") or "").strip() or os.environ.get("TELEGRAM_CHAT_ID", "")
+MARKET_MOVERS_CHAT_ID = (
+    str(_telegram.get("market_movers_chat_id") or "").strip()
+    or os.environ.get("TELEGRAM_MARKET_MOVERS_CHAT_ID", "")
+)
 
 # БД: use_redis true → Redis по redis_url, false → локальный SQLite по sqlite_path
 _use_redis = _db_cfg.get("use_redis")
@@ -81,8 +85,16 @@ MEXC_KLINE_DELAY = float(_scanner.get("kline_delay") or 0.35)
 RSI_PERIOD = int(_scanner.get("rsi_period") or 24)
 RSI_THRESHOLD_1H = float(_scanner.get("rsi_threshold_1h") or 90.0)
 RSI_THRESHOLD_4H = float(_scanner.get("rsi_threshold_4h") or 85.0)
+# Ниже минимум 60 сек для 1H, чтобы не слать по первому тику (RSI тогда не совпадает с графиком)
+_min_1h = int(_scanner.get("min_alert_delay_1h_sec") or 120)
+MIN_ALERT_DELAY_1H_SEC = max(60, _min_1h)
+MIN_ALERT_DELAY_4H_SEC = max(60, int(_scanner.get("min_alert_delay_4h_sec") or 150))
 KLINE_HISTORY_COUNT = int(_scanner.get("kline_history_count") or 30)
 WS_PING_INTERVAL = int(_scanner.get("ws_ping_interval") or 15)
+MARKET_MOVERS_INTERVAL_SEC = int(_scanner.get("market_movers_interval_sec") or 120)
+MARKET_MOVERS_MIN_RISE_PCT = float(_scanner.get("market_movers_min_rise_pct") or 5.0)
+MARKET_MOVERS_TOP_N = int(_scanner.get("market_movers_top_n") or 25)
+MARKET_MOVERS_NEW_COOLDOWN_SEC = int(_scanner.get("market_movers_new_cooldown_sec") or 1800)
 
 # Messages (for telegram_notify)
 MESSAGES = _messages
