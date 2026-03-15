@@ -1,0 +1,24 @@
+# Тексты сообщений в Telegram. Можно менять в любой момент.
+
+rsi_signal:
+  title: "🚨 REAL-TIME RSI SIGNAL (MEXC Futures)"
+  coin_label: "Монета"
+  rsi_label: "RSI (24)"
+  condition_label: "Условие"
+  condition_value: "RSI ≥ порога (1H ≥ 90, 4H ≥ 85)"
+  price_label: "Цена"
+  price_suffix: "USDT"
+  candle_start_label: "Начало свечи"
+  time_after_open_label: "Время после открытия"
+  time_after_open_suffix: "мин"
+
+# Сообщение при старте бота (если chat_id задан)
+startup:
+  text: "✅ MEXC RSI Scanner запущен и работает 24/7.\n\n📊 Сканирую все USDT-фьючерсы MEXC по двум таймфреймам:\n• 1H — сигнал при RSI(24) ≥ 90\n• 4H — сигнал при RSI(24) ≥ 85\n\nУведомления будут приходить сюда."
+
+# Приветствие по /start (шапка и кнопки)
+welcome:
+  text: "👋 Добро пожаловать!\n\n📊 Я сканирую все USDT-фьючерсы MEXC в реальном времени по двум таймфреймам:\n• 1H — сигнал при RSI(24) ≥ 90\n• 4H — сигнал при RSI(24) ≥ 85\n\n🔔 Нажми на кнопки ниже — последние уведомления и просмотр БД."
+  # Шапка: положи файл header.png / header.jpg / header.webp в папку assets/ — он подставится автоматически.
+  # Либо укажи URL картинки здесь (оставь пустым, если используешь файл из assets/).
+  header_image_url: ""

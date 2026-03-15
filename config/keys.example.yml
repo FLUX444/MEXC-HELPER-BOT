@@ -1,0 +1,16 @@
+# Скопируйте в keys.yml и заполните. Файл keys.yml не коммитится в git.
+
+telegram:
+  bot_token: ""      # Токен от @BotFather
+  chat_id: ""        # ID чата для уведомлений (число или строка)
+
+mexc:
+  api_key: ""        # Опционально, для сканера не нужен
+  secret_key: ""     # Опционально
+
+# БД: use_redis true — Redis по url; false — локальный SQLite на ПК.
+# При use_redis true и redis_url localhost:6379 бот при старте сам попытается поднять Redis в Docker (docker start redis или docker run ...).
+db:
+  use_redis: false          # true = Redis (укажи redis_url), false = SQLite
+  redis_url: "redis://localhost:6379/0"
+  sqlite_path: "data/scanner.db"

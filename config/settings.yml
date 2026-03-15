@@ -1,0 +1,16 @@
+# Настройки сканера (без секретов). Можно менять в любой момент.
+
+scanner:
+  rsi_period: 24
+  # Пороги для разных таймфреймов
+  rsi_threshold_1h: 90.0   # 1H: сигнал при RSI >= 90
+  rsi_threshold_4h: 85.0   # 4H: сигнал при RSI >= 85
+  kline_history_count: 30
+  kline_batch: 3           # Параллельных запросов (MEXC лимит ~10/с; больше — 510)
+  kline_delay: 0.35        # Секунд паузы между запросами истории
+  ws_ping_interval: 15     # Секунды между ping по WebSocket
+
+mexc:
+  rest_base: "https://api.mexc.com"
+  ws_url: "wss://contract.mexc.com/edge"
+  kline_interval: "Min60"  # Базовый интервал 1H; для 4H в коде используется Hour4

@@ -1,0 +1,26 @@
+# Юнит для запуска MEXC RSI Scanner 24/7 (Linux, systemd)
+#
+# Установка на VPS/сервер:
+#   1. Замени PROJECT_DIR и USER на свои (путь к проекту и пользователь Linux)
+#   2. sudo cp deploy/mexc-scanner.service /etc/systemd/system/
+#   3. sudo systemctl daemon-reload && sudo systemctl enable mexc-scanner && sudo systemctl start mexc-scanner
+#   4. Логи: journalctl -u mexc-scanner -f
+#
+# Redis должен быть запущен отдельно (systemctl start redis) или используй Docker для бота+Redis.
+
+[Unit]
+Description=MEXC RSI Scanner (Telegram bot 24/7)
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=USER
+WorkingDirectory=PROJECT_DIR
+ExecStart=PROJECT_DIR/.venv/bin/python -m scanner
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
