@@ -82,7 +82,8 @@ MEXC_WS_URL = (_mexc_cfg.get("ws_url") or "wss://contract.mexc.com/edge").strip(
 MEXC_KLINE_INTERVAL = (_mexc_cfg.get("kline_interval") or "Min60").strip()
 MEXC_KLINE_BATCH = int(_scanner.get("kline_batch") or os.environ.get("MEXC_KLINE_BATCH", "3"))
 MEXC_KLINE_DELAY = float(_scanner.get("kline_delay") or 0.35)
-RSI_PERIOD = int(_scanner.get("rsi_period") or 24)
+# Всегда RSI3(24) для совпадения с графиком MEXC; иное значение из конфига не используется
+RSI_PERIOD = 24
 RSI_THRESHOLD_1H = float(_scanner.get("rsi_threshold_1h") or 90.0)
 RSI_THRESHOLD_4H = float(_scanner.get("rsi_threshold_4h") or 85.0)
 # Ниже минимум 60 сек для 1H, чтобы не слать по первому тику (RSI тогда не совпадает с графиком)
@@ -95,6 +96,8 @@ MARKET_MOVERS_INTERVAL_SEC = int(_scanner.get("market_movers_interval_sec") or 1
 MARKET_MOVERS_MIN_RISE_PCT = float(_scanner.get("market_movers_min_rise_pct") or 5.0)
 MARKET_MOVERS_TOP_N = int(_scanner.get("market_movers_top_n") or 25)
 MARKET_MOVERS_NEW_COOLDOWN_SEC = int(_scanner.get("market_movers_new_cooldown_sec") or 1800)
+MARKET_MOVERS_ALERT_DELAY_SEC = float(_scanner.get("market_movers_alert_delay_sec") or 4)
+MARKET_MOVERS_MAX_PER_CYCLE = int(_scanner.get("market_movers_max_per_cycle") or 5)
 
 # Messages (for telegram_notify)
 MESSAGES = _messages

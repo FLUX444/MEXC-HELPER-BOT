@@ -16,8 +16,10 @@ import aiohttp
 
 from config import (
     KLINE_HISTORY_COUNT,
+    MARKET_MOVERS_ALERT_DELAY_SEC,
     MARKET_MOVERS_CHAT_ID,
     MARKET_MOVERS_INTERVAL_SEC,
+    MARKET_MOVERS_MAX_PER_CYCLE,
     MARKET_MOVERS_MIN_RISE_PCT,
     MARKET_MOVERS_NEW_COOLDOWN_SEC,
     MARKET_MOVERS_TOP_N,
@@ -173,8 +175,11 @@ async def main() -> None:
             if not top:
                 continue
             now = time.time()
+            sent_this_cycle = 0
             # Каждое «новое» предложение (пара впервые за cooldown) — отдельное сообщение со ссылкой
             for sym, t in top:
+                if sent_this_cycle >= MARKET_MOVERS_MAX_PER_CYCLE:
+                    break
                 last_sent = mover_new_last_sent.get(sym, 0)
                 if now - last_sent < MARKET_MOVERS_NEW_COOLDOWN_SEC:
                     continue
@@ -184,8 +189,9 @@ async def main() -> None:
                 ok = await send_market_mover_alert(sym, rise_pct, vol24, price)
                 if ok:
                     mover_new_last_sent[sym] = now
+                    sent_this_cycle += 1
                     logger.info("Market mover new alert: %s +%.2f%%", sym, rise_pct)
-            # Сводку раз в 2 мин не шлём — только новые появления (отдельным сообщением со ссылкой выше)
+                    await asyncio.sleep(MARKET_MOVERS_ALERT_DELAY_SEC)
 
     if MARKET_MOVERS_CHAT_ID:
         logger.info("Маркет-муверы: канал %s, только новые появления со ссылкой (проверка раз в %s сек, cooldown %s сек)",

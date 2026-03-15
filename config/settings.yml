@@ -1,6 +1,7 @@
 # Настройки сканера (без секретов). Можно менять в любой момент.
 
 scanner:
+  # RSI всегда считается с периодом 24 (RSI3 на графике MEXC); rsi_period из конфига не используется
   rsi_period: 24
   # Пороги для разных таймфреймов
   rsi_threshold_1h: 90.0   # 1H: сигнал при RSI >= 90
@@ -17,6 +18,8 @@ scanner:
   market_movers_min_rise_pct: 5.0  # Минимальный рост цены 24h (%)
   market_movers_top_n: 25          # Топ по объёму 24h
   market_movers_new_cooldown_sec: 1800  # Не слать одну и ту же пару чаще чем раз в 30 мин (каждое «новое предложение»)
+  market_movers_alert_delay_sec: 4     # Пауза между отправками (чтобы не сработал Flood control Telegram)
+  market_movers_max_per_cycle: 5        # Макс. алертов за один цикл (остальные — в следующий цикл)
 
 mexc:
   rest_base: "https://api.mexc.com"
