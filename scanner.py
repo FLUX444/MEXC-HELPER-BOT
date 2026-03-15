@@ -153,10 +153,11 @@ async def main() -> None:
         RSI_THRESHOLD_1H, RSI_THRESHOLD_4H, len(symbols),
     )
 
-    # Маркет-муверы по API MEXC (WebSocket push.tickers) — в отдельный канал
+    # Маркет-муверы: только вкладка «Рост цены и высокий объём» (не «Снижение цены», не «Падение», не откуда больше)
     ticker_store: dict[str, dict] = {}
-    mover_new_last_sent: dict[str, float] = {}  # symbol -> unix time последней отправки «нового предложения»
-    min_rise = MARKET_MOVERS_MIN_RISE_PCT / 100.0  # API: 0.05 = 5%
+    mover_new_last_sent: dict[str, float] = {}
+    previous_top_symbols: set[str] = set()  # кто был в списке в прошлом цикле — шлём только при появлении
+    min_rise = MARKET_MOVERS_MIN_RISE_PCT / 100.0
 
     async def on_tickers(data_list: list, ctx: dict) -> None:
         for item in data_list:
@@ -164,26 +165,37 @@ async def main() -> None:
                 ticker_store[item["symbol"]] = item
 
     async def market_movers_loop() -> None:
+        nonlocal previous_top_symbols
         while True:
             await asyncio.sleep(MARKET_MOVERS_INTERVAL_SEC)
             if not MARKET_MOVERS_CHAT_ID or not ticker_store:
                 continue
-            # Фильтр как на MEXC: «Рост цены и высокий объём» — рост 24ч >= min_rise%, объём 24h > 0, только USDT
+            # Только эта вкладка: рост цены 24ч (>= min_rise%) + высокий объём; «Снижение цены»/«Падение» не трогаем
             candidates = [
                 (sym, t)
                 for sym, t in ticker_store.items()
                 if sym.endswith("_USDT")
-                and (t.get("riseFallRate") or 0) >= min_rise
+                and (t.get("riseFallRate") or 0) >= min_rise  # только рост, не падение
                 and (t.get("volume24") or 0) > 0
             ]
             candidates.sort(key=lambda x: float(x[1].get("volume24") or 0), reverse=True)
-            top = candidates[:MARKET_MOVERS_TOP_N]  # топ по объёму = высокий объём
+            top = candidates[:MARKET_MOVERS_TOP_N]
             if not top:
                 continue
+            current_top = {sym for sym, _ in top}
+            # Первый цикл — только запомнить список, не слать
+            if not previous_top_symbols:
+                previous_top_symbols = current_top
+                continue
+            # Шлём только пары, которые только что появились в списке (как «новые» в окне MEXC)
+            newly_in_list = current_top - previous_top_symbols
+            previous_top_symbols = current_top
+
             now = time.time()
             sent_this_cycle = 0
-            # Только самые новые: пара впервые за cooldown попала в фильтр — одно уведомление в канал со ссылкой
             for sym, t in top:
+                if sym not in newly_in_list:
+                    continue
                 if sent_this_cycle >= MARKET_MOVERS_MAX_PER_CYCLE:
                     break
                 last_sent = mover_new_last_sent.get(sym, 0)
@@ -196,12 +208,12 @@ async def main() -> None:
                 if ok:
                     mover_new_last_sent[sym] = now
                     sent_this_cycle += 1
-                    logger.info("Market mover new alert: %s +%.2f%%", sym, rise_pct)
+                    logger.info("Market mover new alert: %s +%.2f%% (появился в списке)", sym, rise_pct)
                     await asyncio.sleep(MARKET_MOVERS_ALERT_DELAY_SEC)
 
     if MARKET_MOVERS_CHAT_ID:
-        logger.info("Маркет-муверы: фильтр «рост цены и высокий объём», только новые в канал %s (раз в %s сек, cooldown %s сек)",
-                    MARKET_MOVERS_CHAT_ID, MARKET_MOVERS_INTERVAL_SEC, MARKET_MOVERS_NEW_COOLDOWN_SEC)
+        logger.info("Маркет-муверы: только вкладка «Рост цены и высокий объём», только новые в канал %s",
+                    MARKET_MOVERS_CHAT_ID)
         tasks.append(asyncio.create_task(run_ws_ticker_stream(on_tickers, ticker_store, reconnect_delay=5.0)))
         tasks.append(asyncio.create_task(market_movers_loop()))
     else:
