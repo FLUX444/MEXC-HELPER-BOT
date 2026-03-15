@@ -169,7 +169,7 @@ sudo systemctl start mexc-scanner
    ssh root@ТВОЙ_СЕРВЕР "cd /root/programms/MEXC && git pull && sudo systemctl restart mexc-scanner && echo OK"
    ```
 
-Файлы `config/keys.yml` и папка `data/` в Git не попадают (см. `.gitignore`), поэтому на сервере они не перезатрутся при `git pull`.
+Файлы `config/keys.yml` и папка `data/` в Git не попадают (см. `.gitignore`), поэтому на сервере они не перезатрутся при `git pull`. **Если в репозитории добавили новый ключ** (например `market_movers_chat_id`) в `keys.example.yml`, его нужно вручную дописать в свой `config/keys.yml` на сервере и на ПК.
 
 ---
 

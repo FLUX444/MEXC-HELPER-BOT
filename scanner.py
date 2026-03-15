@@ -30,7 +30,7 @@ from config import (
 from indicators import rsi
 from mexc_client import fetch_contract_list, fetch_klines_batch, run_ws_kline_stream, run_ws_ticker_stream
 from state import StateStore
-from telegram_notify import send_market_mover_alert, send_market_movers, send_signal, send_startup_message
+from telegram_notify import send_market_mover_alert, send_signal, send_startup_message
 
 logger = logging.getLogger(__name__)
 
@@ -185,25 +185,10 @@ async def main() -> None:
                 if ok:
                     mover_new_last_sent[sym] = now
                     logger.info("Market mover new alert: %s +%.2f%%", sym, rise_pct)
-            now_utc = time.strftime("%m-%d %H:%M:%S", time.gmtime())
-            lines = []
-            for sym, t in top:
-                display = sym.replace("_", "")
-                vol24 = float(t.get("volume24") or 0)
-                rise = float(t.get("riseFallRate") or 0) * 100
-                price = t.get("lastPrice") or t.get("fairPrice") or 0
-                lines.append(
-                    f"<b>{display} USDT</b> Бессрочный\n"
-                    f"{now_utc}\n"
-                    f"Объём 24h: {vol24:,.0f} · Изменение: <b>+{rise:.2f}%</b>\n"
-                    f"Легкий рост, высокий объём"
-                )
-            if lines:
-                await send_market_movers(lines)
-                logger.info("Market movers sent %d items to channel", len(lines))
+            # Сводку раз в 2 мин не шлём — только новые появления (отдельным сообщением со ссылкой выше)
 
     if MARKET_MOVERS_CHAT_ID:
-        logger.info("Маркет-муверы: канал %s, сводка раз в %s сек, новые предложения со ссылкой (cooldown %s сек)",
+        logger.info("Маркет-муверы: канал %s, только новые появления со ссылкой (проверка раз в %s сек, cooldown %s сек)",
                     MARKET_MOVERS_CHAT_ID, MARKET_MOVERS_INTERVAL_SEC, MARKET_MOVERS_NEW_COOLDOWN_SEC)
         tasks.append(asyncio.create_task(run_ws_ticker_stream(on_tickers, ticker_store, reconnect_delay=5.0)))
         tasks.append(asyncio.create_task(market_movers_loop()))

@@ -364,23 +364,11 @@ async def btn_db(message: Message) -> None:
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_back_keyboard())
 
 
-@router.message(F.text, _filter_market_mover)
-async def forward_market_mover_message(message: Message, bot: Bot) -> None:
-    """Пересылает уведомления «Маркет-муверы» в отдельный канал."""
-    await _forward_to_market_movers_channel(message, bot)
-
-
-@router.channel_post(F.text, _filter_market_mover)
-async def forward_market_mover_channel_post(message: Message, bot: Bot) -> None:
-    """Пересылает посты канала с маркет-муверами в отдельный канал."""
-    await _forward_to_market_movers_channel(message, bot)
-
-
-@router.channel_post(F.caption, _filter_market_mover)
-async def forward_market_mover_channel_post_caption(message: Message, bot: Bot) -> None:
-    """Пересылает посты с подписью (фото и т.п.) маркет-муверов в отдельный канал."""
-    await _forward_to_market_movers_channel(message, bot)
-
+# Пересылка из других чатов в канал маркет-муверов отключена — в канал идут только
+# наши сообщения от сканера (сводка + отдельные уведомления со ссылкой на пару).
+# @router.message(F.text, _filter_market_mover)
+# @router.channel_post(F.text, _filter_market_mover)
+# @router.channel_post(F.caption, _filter_market_mover)
 
 @router.message(F.text)
 async def delete_user_message(message: Message, bot: Bot) -> None:
