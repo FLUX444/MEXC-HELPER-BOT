@@ -132,7 +132,7 @@ async def send_startup_message() -> bool:
     if not TELEGRAM_BOT_TOKEN or chat_id is None:
         return False
     cfg = (MESSAGES or {}).get("startup") or {}
-    text = cfg.get("text") or "✅ MEXC RSI Scanner запущен 24/7. RSI3(24) по открытой свече: 1H и 4H при ≥ 90. Маркет-муверы: только «Рост цены и высокий объём»."
+    text = cfg.get("text") or "✅ MEXC RSI Scanner запущен 24/7. RSI3(24) только 4H при ≥ 90. Маркет-муверы: только «Рост цены и высокий объём»."
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
     header_path = _get_header_path()
     try:

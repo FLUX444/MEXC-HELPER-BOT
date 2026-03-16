@@ -1,6 +1,6 @@
 """
 Сканер RSI3(24) и маркет-муверы (асинхронно).
-- 1H и 4H: RSI по текущей (открытой) свече, которая формируется. Сигнал строго если RSI3(24) >= 90.
+- Только 4H: RSI по текущей (открытой) свече. Сигнал строго если RSI3(24) >= 90.
 - Маркет-муверы: только «Рост цены и высокий объём», уведомление при появлении новой пары.
 Антиспам: symbol + timeframe + candle_open_time (один раз на свечу).
 """
@@ -22,10 +22,8 @@ from config import (
     MARKET_MOVERS_MIN_RISE_PCT,
     MARKET_MOVERS_NEW_COOLDOWN_SEC,
     MARKET_MOVERS_TOP_N,
-    MIN_ALERT_DELAY_1H_SEC,
     MIN_ALERT_DELAY_4H_SEC,
     RSI_PERIOD,
-    RSI_THRESHOLD_1H,
     RSI_THRESHOLD_4H,
 )
 from indicators import rsi
@@ -68,7 +66,7 @@ async def on_kline(data: dict, symbol: str, ctx: dict) -> None:
     # Не слать в первые секунды свечи — первый тик даёт всплеск, не совпадающий с графиком MEXC
     now_sec = int(time.time())
     elapsed = now_sec - state.candle_start_time
-    min_delay = MIN_ALERT_DELAY_4H_SEC if tf_name == "4H" else MIN_ALERT_DELAY_1H_SEC
+    min_delay = MIN_ALERT_DELAY_4H_SEC
     if elapsed < min_delay:
         return
     already_sent = await store.get_alert_sent(state_key, state.candle_start_time)
@@ -135,22 +133,14 @@ async def main() -> None:
             logger.error("No symbols; exit")
             return
         logger.info("Loading kline history (throttled for MEXC limit)...")
-        # 1H
-        await bootstrap_symbols_for_tf(session, store, symbols, interval="Min60", tf_name="1H")
-        # 4H (MEXC API: Hour4, не Min240)
         await bootstrap_symbols_for_tf(session, store, symbols, interval="Hour4", tf_name="4H")
 
-    # Запускаем два WebSocket‑потока: 1H и 4H
-    ctx_1h = {"store": store, "log_every_n": 5000, "tf_name": "1H", "threshold": RSI_THRESHOLD_1H}
     ctx_4h = {"store": store, "log_every_n": 10000, "tf_name": "4H", "threshold": RSI_THRESHOLD_4H}
-
-    ws_1h = asyncio.create_task(run_ws_kline_stream(symbols, on_kline, ctx_1h, interval="Min60", reconnect_delay=5.0))
     ws_4h = asyncio.create_task(run_ws_kline_stream(symbols, on_kline, ctx_4h, interval="Hour4", reconnect_delay=5.0))
-    tasks = [ws_1h, ws_4h]
+    tasks = [ws_4h]
     logger.info(
-        "RSI: сканирование запущено — 1H (порог ≥%.0f) и 4H (порог ≥%.0f) по %d парам. "
-        "Уведомления в Telegram при достижении порога.",
-        RSI_THRESHOLD_1H, RSI_THRESHOLD_4H, len(symbols),
+        "RSI: сканирование 4H запущено — RSI3(24) ≥ %.0f по %d парам.",
+        RSI_THRESHOLD_4H, len(symbols),
     )
 
     # Маркет-муверы: только вкладка «Рост цены и высокий объём» (не «Снижение цены», не «Падение», не откуда больше)
