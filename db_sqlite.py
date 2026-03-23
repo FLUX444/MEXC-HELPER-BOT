@@ -11,6 +11,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 ALERTS_TABLE = "rsi_alerts"
+PREALERT_TABLE = "rsi_prealert"
 SIGNALS_TABLE = "last_signals"
 LAST_SIGNALS_MAX = 20
 
@@ -21,6 +22,9 @@ def _init_conn(path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(path, check_same_thread=False)
     conn.execute(
         f"CREATE TABLE IF NOT EXISTS {ALERTS_TABLE} (symbol TEXT, candle_start INTEGER, PRIMARY KEY (symbol, candle_start))"
+    )
+    conn.execute(
+        f"CREATE TABLE IF NOT EXISTS {PREALERT_TABLE} (symbol TEXT, candle_start INTEGER, PRIMARY KEY (symbol, candle_start))"
     )
     conn.execute(
         f"""CREATE TABLE IF NOT EXISTS {SIGNALS_TABLE}
@@ -47,6 +51,42 @@ def _set_alert_sent_sync(conn: sqlite3.Connection, symbol: str, candle_start: in
         f"INSERT OR REPLACE INTO {ALERTS_TABLE} (symbol, candle_start) VALUES (?, ?)",
         (symbol, candle_start),
     )
+    conn.commit()
+
+
+def _try_claim_alert_sync(conn: sqlite3.Connection, symbol: str, candle_start: int) -> bool:
+    """True если мы первые зарегистрировали алерт (аналог Redis SETNX)."""
+    cur = conn.execute(
+        f"INSERT OR IGNORE INTO {ALERTS_TABLE} (symbol, candle_start) VALUES (?, ?)",
+        (symbol, candle_start),
+    )
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def _try_claim_prealert_sync(conn: sqlite3.Connection, symbol: str, candle_start: int) -> bool:
+    cur = conn.execute(
+        f"INSERT OR IGNORE INTO {PREALERT_TABLE} (symbol, candle_start) VALUES (?, ?)",
+        (symbol, candle_start),
+    )
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def _release_prealert_claim_sync(conn: sqlite3.Connection, symbol: str, candle_start: int) -> None:
+    conn.execute(
+        f"DELETE FROM {PREALERT_TABLE} WHERE symbol=? AND candle_start=?",
+        (symbol, candle_start),
+    )
+    conn.commit()
+
+
+def _release_alert_claim_sync(conn: sqlite3.Connection, symbol: str, candle_start: int) -> None:
+    conn.execute(
+        f"DELETE FROM {ALERTS_TABLE} WHERE symbol=? AND candle_start=?",
+        (symbol, candle_start),
+    )
+    conn.commit()
     # Удалить старые (старше 2 дней)
     expire = int(time.time()) - 86400 * 2
     conn.execute(f"DELETE FROM {ALERTS_TABLE} WHERE candle_start < ?", (expire,))
@@ -114,6 +154,22 @@ class SQLiteStore:
     async def set_alert_sent(self, symbol: str, candle_start: int) -> None:
         conn = self._get_conn()
         await asyncio.to_thread(_set_alert_sent_sync, conn, symbol, candle_start)
+
+    async def try_claim_alert(self, symbol: str, candle_start: int) -> bool:
+        conn = self._get_conn()
+        return await asyncio.to_thread(_try_claim_alert_sync, conn, symbol, candle_start)
+
+    async def release_alert_claim(self, symbol: str, candle_start: int) -> None:
+        conn = self._get_conn()
+        await asyncio.to_thread(_release_alert_claim_sync, conn, symbol, candle_start)
+
+    async def try_claim_prealert(self, contract_symbol: str, candle_start: int) -> bool:
+        conn = self._get_conn()
+        return await asyncio.to_thread(_try_claim_prealert_sync, conn, contract_symbol, candle_start)
+
+    async def release_prealert_claim(self, contract_symbol: str, candle_start: int) -> None:
+        conn = self._get_conn()
+        await asyncio.to_thread(_release_prealert_claim_sync, conn, contract_symbol, candle_start)
 
     async def push_last_signal(
         self, symbol: str, rsi_val: float, price: float, candle_start: int, tf: str | None = None

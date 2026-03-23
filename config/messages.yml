@@ -1,20 +1,29 @@
 # Тексты сообщений в Telegram. Можно менять в любой момент.
 
 rsi_signal:
-  title: "🚨 REAL-TIME RSI SIGNAL"
+  title: "🚨 RSI SIGNAL (4H)"
   coin_label: "Монета"
   rsi_label: "RSI3(24)"
   price_label: "Цена"
   price_suffix: "USDT"
   candle_start_label: "Свеча открыта"
+  subtitle: "RSI ≥ 90"
+
+rsi_prealert:
+  title: "⚠️ RSI PRE-ALERT (4H)"
+  rsi_label: "RSI (24)"
+  range_label: "Диапазон"
+  price_suffix: "USDT"
+  candle_label: "Свеча"
+  elapsed_label: "Прошло"
 
 # Сообщение при старте бота (если chat_id задан)
 startup:
-  text: "✅ MEXC RSI Scanner запущен 24/7.\n\n📊 RSI3(24) только 4H — сигнал при RSI ≥ 90 (по открытой свече).\n📈 Маркет-муверы: только «Рост цены и высокий объём».\n\nУведомления приходят сюда."
+  text: "✅ MEXC RSI Scanner запущен 24/7.\n\n📊 4H, открытая свеча: PRE-ALERT при RSI 85–90, основной сигнал при RSI ≥ 90.\n💾 Redis обязателен (антидубли).\n📈 Маркет-муверы: только «Рост цены и высокий объём».\n\nУведомления приходят сюда."
 
 # Приветствие по /start (шапка и кнопки)
 welcome:
-  text: "👋 Добро пожаловать!\n\n📊 RSI3(24) только 4H — сигнал при RSI ≥ 90.\n📈 Маркет-муверы: только «Рост цены и высокий объём».\n\n🔔 Кнопки ниже — последние уведомления и БД."
+  text: "👋 Добро пожаловать!\n\n📊 4H: PRE-ALERT (RSI 85+), сигнал при RSI ≥ 90. Нужен Redis.\n📈 Маркет-муверы: только «Рост цены и высокий объём».\n\n🔔 Кнопки ниже — последние уведомления и БД."
   # Шапка: положи файл header.png / header.jpg / header.webp в папку assets/ — он подставится автоматически.
   # Либо укажи URL картинки здесь (оставь пустым, если используешь файл из assets/).
   header_image_url: ""

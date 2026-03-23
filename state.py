@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 
 from config import RSI_PERIOD
@@ -82,12 +83,21 @@ class SymbolState:
 class StateStore:
     """In-memory state + Redis или SQLite для alert_sent и последних сигналов."""
 
+    # TTL флага main-алерта
+    ALERT_FLAG_TTL_SEC = 3600
+    # PRE-ALERT: ключ prealert:{symbol}:{candle_open_time}, TTL 4 ч (как в ТЗ)
+    PREALERT_FLAG_TTL_SEC = 4 * 3600
+    _MEMORY_CLAIMS_MAX = 8000
+
     def __init__(self, redis_url: str = "", sqlite_path: str = ""):
         self._states: dict[str, SymbolState] = {}
         self._redis_url = redis_url
         self._redis = None
         self._sqlite_path = (sqlite_path or "").strip()
         self._sqlite: "SQLiteStore | None" = None
+        # Fallback без БД: антидубль в памяти (один процесс)
+        self._memory_claims: set[tuple[str, int]] = set()
+        self._memory_prealert: set[tuple[str, int]] = set()
 
     async def ensure_redis(self, wait_seconds: float = 0):
         """Подключение к Redis или SQLite. Если Redis по localhost:6379 недоступен — пробуем поднять контейнер Docker."""
@@ -159,9 +169,99 @@ class StateStore:
         if self._redis:
             try:
                 key = f"rsi_alert:{symbol}:{candle_start}"
-                await self._redis.set(key, "1", ex=86400 * 2)
+                await self._redis.set(key, "1", ex=self.ALERT_FLAG_TTL_SEC)
             except Exception:
                 pass
+
+    def _prune_memory_claims(self) -> None:
+        if len(self._memory_claims) <= self._MEMORY_CLAIMS_MAX:
+            return
+        now = int(time.time())
+        cutoff = now - 86400 * 2
+        self._memory_claims = {p for p in self._memory_claims if p[1] >= cutoff}
+
+    async def try_claim_alert(self, symbol: str, candle_start: int) -> bool:
+        """
+        Атомарная попытка «занять» слот сигнала (symbol = state_key вида BTC_USDT@4H).
+        True — мы первые, можно слать в Telegram; False — дубль или уже отправлено.
+        """
+        if self._sqlite:
+            return await self._sqlite.try_claim_alert(symbol, candle_start)
+        if self._redis:
+            try:
+                key = f"rsi_alert:{symbol}:{candle_start}"
+                ok = await self._redis.set(key, "1", nx=True, ex=self.ALERT_FLAG_TTL_SEC)
+                return bool(ok)
+            except Exception as e:
+                logger.warning("try_claim_alert Redis: %s (сигнал пропущен, нет атомарного claim)", e)
+                return False
+        # Только память (нет Redis и SQLite в конфиге)
+        self._prune_memory_claims()
+        pair = (symbol, candle_start)
+        if pair in self._memory_claims:
+            return False
+        self._memory_claims.add(pair)
+        s = self._states.get(symbol)
+        if s:
+            s.alert_sent = True
+        return True
+
+    async def release_alert_claim(self, symbol: str, candle_start: int) -> None:
+        """Если Telegram не принял сообщение — освободить слот для повторной попытки."""
+        if self._sqlite:
+            await self._sqlite.release_alert_claim(symbol, candle_start)
+            return
+        if self._redis:
+            try:
+                key = f"rsi_alert:{symbol}:{candle_start}"
+                await self._redis.delete(key)
+            except Exception as e:
+                logger.debug("release_alert_claim Redis: %s", e)
+            return
+        self._memory_claims.discard((symbol, candle_start))
+        s = self._states.get(symbol)
+        if s and s.candle_start_time == candle_start:
+            s.alert_sent = False
+
+    async def try_claim_prealert(self, contract_symbol: str, candle_start: int) -> bool:
+        """
+        SETNX prealert:{contract_symbol}:{candle_start}, TTL 4 ч.
+        contract_symbol — как в MEXC, например BTC_USDT (не state_key).
+        """
+        if self._sqlite:
+            return await self._sqlite.try_claim_prealert(contract_symbol, candle_start)
+        if self._redis:
+            try:
+                key = f"prealert:{contract_symbol}:{candle_start}"
+                ok = await self._redis.set(key, "1", nx=True, ex=self.PREALERT_FLAG_TTL_SEC)
+                return bool(ok)
+            except Exception as e:
+                logger.warning("try_claim_prealert Redis: %s", e)
+                return False
+        self._prune_memory_prealert()
+        pair = (contract_symbol, candle_start)
+        if pair in self._memory_prealert:
+            return False
+        self._memory_prealert.add(pair)
+        return True
+
+    def _prune_memory_prealert(self) -> None:
+        if len(self._memory_prealert) <= self._MEMORY_CLAIMS_MAX:
+            return
+        self._memory_prealert.clear()
+
+    async def release_prealert_claim(self, contract_symbol: str, candle_start: int) -> None:
+        if self._sqlite:
+            await self._sqlite.release_prealert_claim(contract_symbol, candle_start)
+            return
+        if self._redis:
+            try:
+                key = f"prealert:{contract_symbol}:{candle_start}"
+                await self._redis.delete(key)
+            except Exception as e:
+                logger.debug("release_prealert_claim Redis: %s", e)
+            return
+        self._memory_prealert.discard((contract_symbol, candle_start))
 
     LAST_SIGNALS_KEY = "mexc:last_signals"
     LAST_SIGNALS_MAX = 20

@@ -1,6 +1,7 @@
 """Telegram notifications: RSI3(24) >= 90 (по закрытой свече), маркет-муверы. Тексты из config/messages.yml. Aiogram."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import datetime, timezone
@@ -10,9 +11,21 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import FSInputFile
 
-from config import BASE_DIR, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, MESSAGES, MARKET_MOVERS_CHAT_ID
+from config import (
+    BASE_DIR,
+    MARKET_MOVERS_CHAT_ID,
+    MESSAGES,
+    RSI_PREALERT_MIN,
+    TELEGRAM_BOT_TOKEN,
+    TELEGRAM_CHAT_ID,
+    TELEGRAM_RETRY_BASE_DELAY_SEC,
+    TELEGRAM_SEND_RETRIES,
+)
 
 logger = logging.getLogger(__name__)
+
+# Очередь по смыслу: не бомбить Telegram параллельно (flood / rate limit)
+_telegram_send_lock = asyncio.Lock()
 
 # Чтобы не спамить лог при постоянных "chat not found"
 _last_chat_not_found_log = 0.0
@@ -72,6 +85,19 @@ def _fmt_utc(ts_sec: int) -> str:
     return datetime.fromtimestamp(ts_sec, tz=timezone.utc).strftime("%H:%M UTC")
 
 
+def _fmt_elapsed(sec: int) -> str:
+    """Человекочитаемое время от открытия свечи (например 1ч 20м)."""
+    if sec < 0:
+        sec = 0
+    h = sec // 3600
+    m = (sec % 3600) // 60
+    parts: list[str] = []
+    if h:
+        parts.append(f"{h}ч")
+    parts.append(f"{m}м")
+    return " ".join(parts)
+
+
 def _msg_cfg() -> dict:
     return (MESSAGES or {}).get("rsi_signal") or {}
 
@@ -86,7 +112,8 @@ def build_message(
 ) -> str:
     """Формат по ТЗ: RSI3(24) по открытой свече, «Свеча открыта», «Свеча формируется», ссылка."""
     cfg = _msg_cfg()
-    title = cfg.get("title") or "🚨 REAL-TIME RSI SIGNAL"
+    title = cfg.get("title") or "🚨 RSI SIGNAL (4H)"
+    subtitle = cfg.get("subtitle") or "RSI ≥ 90"
     coin_label = cfg.get("coin_label") or "Монета"
     rsi_label = cfg.get("rsi_label") or "RSI3(24)"
     price_label = cfg.get("price_label") or "Цена"
@@ -103,13 +130,55 @@ def build_message(
     tf_line = f"Таймфрейм: <b>{tf_name}</b>\n\n" if tf_name else ""
 
     return (
-        f"{title}\n\n"
+        f"{title}\n"
+        f"{subtitle}\n\n"
         f"{coin_label}: {coin_link}\n"
         f"{rsi_label}: <b>{rsi_value:.2f}</b>\n"
         f"{tf_line}"
         f"💰 {price_label}: <b>{price:.4g}</b> {price_suffix}\n\n"
         f"🕐 {candle_open_label}: {_fmt_utc(candle_start_sec)} UTC\n"
         f"Свеча формируется\n\n"
+        f"🔗 {link}"
+    )
+
+
+def _prealert_cfg() -> dict:
+    return (MESSAGES or {}).get("rsi_prealert") or {}
+
+
+def build_prealert_message(
+    symbol: str,
+    rsi_value: float,
+    price: float,
+    candle_start_sec: int,
+    elapsed_sec: int,
+    *,
+    tf_name: str = "4H",
+    main_threshold: float = 90.0,
+) -> str:
+    """Формат PRE-ALERT по ТЗ (диапазон 85 .. < main)."""
+    cfg = _prealert_cfg()
+    title = cfg.get("title") or "⚠️ RSI PRE-ALERT (4H)"
+    rsi_label = cfg.get("rsi_label") or "RSI (24)"
+    range_label = cfg.get("range_label") or "Диапазон"
+    price_suffix = cfg.get("price_suffix") or "USDT"
+    candle_label = cfg.get("candle_label") or "Свеча"
+    elapsed_label = cfg.get("elapsed_label") or "Прошло"
+    upper = main_threshold - 0.01
+    range_str = cfg.get("range_text") or f"{RSI_PREALERT_MIN:.0f}–{upper:.2f}"
+
+    display_symbol = symbol.replace("_", "")
+    link = f"{MEXC_FUTURES_URL}{symbol}?interval={tf_name}"
+    coin_link = f'<a href="{link}">#{display_symbol}</a>'
+
+    return (
+        f"{title}\n\n"
+        f"Монета: {coin_link}\n"
+        f"{rsi_label}: <b>{rsi_value:.2f}</b>\n"
+        f"{range_label}: <b>{range_str}</b>\n\n"
+        f"Цена: <b>{price:.4g}</b> {price_suffix}\n\n"
+        f"{candle_label}: {_fmt_utc(candle_start_sec)} UTC\n"
+        f"{elapsed_label}: {_fmt_elapsed(elapsed_sec)}\n\n"
         f"🔗 {link}"
     )
 
@@ -132,7 +201,9 @@ async def send_startup_message() -> bool:
     if not TELEGRAM_BOT_TOKEN or chat_id is None:
         return False
     cfg = (MESSAGES or {}).get("startup") or {}
-    text = cfg.get("text") or "✅ MEXC RSI Scanner запущен 24/7. RSI3(24) только 4H при ≥ 90. Маркет-муверы: только «Рост цены и высокий объём»."
+    text = cfg.get("text") or (
+        "✅ MEXC RSI Scanner запущен 24/7. 4H: PRE-ALERT 85+, сигнал ≥90. Redis. Маркет-муверы: «Рост цены и высокий объём»."
+    )
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
     header_path = _get_header_path()
     try:
@@ -163,22 +234,83 @@ async def send_signal(symbol: str, rsi_value: float, price: float, candle_start_
         )
         return False
     text = build_message(symbol, rsi_value, price, candle_start_sec, tf_name=tf_name)
-    bot = Bot(token=TELEGRAM_BOT_TOKEN)
-    try:
-        from aiogram.enums import ParseMode
-        await bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
-        return True
-    except TelegramBadRequest as e:
-        if "chat not found" in (e.message or "").lower():
-            _log_chat_not_found()
-        else:
-            logger.warning("Telegram send failed: %s", e)
+    from aiogram.enums import ParseMode
+
+    async with _telegram_send_lock:
+        for attempt in range(TELEGRAM_SEND_RETRIES):
+            bot = Bot(token=TELEGRAM_BOT_TOKEN)
+            try:
+                await bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+                return True
+            except TelegramBadRequest as e:
+                if "chat not found" in (e.message or "").lower():
+                    _log_chat_not_found()
+                else:
+                    logger.warning("Telegram send failed: %s", e)
+                return False
+            except Exception as e:
+                logger.warning(
+                    "Telegram send attempt %d/%d: %s",
+                    attempt + 1,
+                    TELEGRAM_SEND_RETRIES,
+                    e,
+                )
+                if attempt + 1 < TELEGRAM_SEND_RETRIES:
+                    await asyncio.sleep(TELEGRAM_RETRY_BASE_DELAY_SEC * (attempt + 1))
+            finally:
+                await bot.session.close()
+    return False
+
+
+async def send_prealert(
+    symbol: str,
+    rsi_value: float,
+    price: float,
+    candle_start_sec: int,
+    elapsed_sec: int,
+    *,
+    tf_name: str = "4H",
+    main_threshold: float = 90.0,
+) -> bool:
+    """PRE-ALERT 4H: один раз на свечу (SETNX в store до вызова)."""
+    chat_id = _get_chat_id()
+    if not TELEGRAM_BOT_TOKEN or chat_id is None:
         return False
-    except Exception as e:
-        logger.exception("Telegram send failed: %s", e)
-        return False
-    finally:
-        await bot.session.close()
+    text = build_prealert_message(
+        symbol,
+        rsi_value,
+        price,
+        candle_start_sec,
+        elapsed_sec,
+        tf_name=tf_name,
+        main_threshold=main_threshold,
+    )
+    from aiogram.enums import ParseMode
+
+    async with _telegram_send_lock:
+        for attempt in range(TELEGRAM_SEND_RETRIES):
+            bot = Bot(token=TELEGRAM_BOT_TOKEN)
+            try:
+                await bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+                return True
+            except TelegramBadRequest as e:
+                if "chat not found" in (e.message or "").lower():
+                    _log_chat_not_found()
+                else:
+                    logger.warning("Telegram prealert failed: %s", e)
+                return False
+            except Exception as e:
+                logger.warning(
+                    "Telegram prealert attempt %d/%d: %s",
+                    attempt + 1,
+                    TELEGRAM_SEND_RETRIES,
+                    e,
+                )
+                if attempt + 1 < TELEGRAM_SEND_RETRIES:
+                    await asyncio.sleep(TELEGRAM_RETRY_BASE_DELAY_SEC * (attempt + 1))
+            finally:
+                await bot.session.close()
+    return False
 
 
 async def send_test_signal() -> tuple[bool, str]:
@@ -243,22 +375,32 @@ async def send_market_mover_alert(symbol: str, rise_pct: float, volume24: float,
         f"Высокий объём торгов\n\n"
         f"🔗 {link}"
     )
-    bot = Bot(token=TELEGRAM_BOT_TOKEN)
-    try:
-        from aiogram.enums import ParseMode
-        await bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
-        return True
-    except TelegramBadRequest as e:
-        if "chat not found" in (e.message or "").lower():
-            _log_chat_not_found()
-        else:
-            logger.warning("Market mover alert send failed: %s", e)
-        return False
-    except Exception as e:
-        logger.exception("Market mover alert send failed: %s", e)
-        return False
-    finally:
-        await bot.session.close()
+    from aiogram.enums import ParseMode
+
+    async with _telegram_send_lock:
+        for attempt in range(TELEGRAM_SEND_RETRIES):
+            bot = Bot(token=TELEGRAM_BOT_TOKEN)
+            try:
+                await bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+                return True
+            except TelegramBadRequest as e:
+                if "chat not found" in (e.message or "").lower():
+                    _log_chat_not_found()
+                else:
+                    logger.warning("Market mover alert send failed: %s", e)
+                return False
+            except Exception as e:
+                logger.warning(
+                    "Market mover send attempt %d/%d: %s",
+                    attempt + 1,
+                    TELEGRAM_SEND_RETRIES,
+                    e,
+                )
+                if attempt + 1 < TELEGRAM_SEND_RETRIES:
+                    await asyncio.sleep(TELEGRAM_RETRY_BASE_DELAY_SEC * (attempt + 1))
+            finally:
+                await bot.session.close()
+    return False
 
 
 async def send_market_movers(movers_lines: list[str]) -> bool:

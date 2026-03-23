@@ -1,6 +1,10 @@
 # Настройки сканера (без секретов). Можно менять в любой момент.
 
 scanner:
+  # true = только Redis (антидубли main + PRE-ALERT через SETNX). В keys.yml: use_redis: true и redis_url.
+  require_redis: true
+  # PRE-ALERT при RSI >= этого значения и < rsi_threshold_4h (один раз на свечу)
+  rsi_prealert_min: 85.0
   # RSI всегда считается с периодом 24 (RSI3 на графике MEXC); rsi_period из конфига не используется
   rsi_period: 24
   # Пороги для разных таймфреймов
@@ -17,6 +21,27 @@ scanner:
   market_movers_new_cooldown_sec: 1800  # Не слать одну и ту же пару чаще чем раз в 30 мин (каждое «новое предложение»)
   market_movers_alert_delay_sec: 4     # Пауза между отправками (чтобы не сработал Flood control Telegram)
   market_movers_max_per_cycle: 5        # Макс. алертов за один цикл (остальные — в следующий цикл)
+
+  # --- Продакшн v5 (auto-healing / zero duplicate) ---
+  ws_stall_timeout_sec: 15               # Нет WS-сообщений N сек → reconnect
+  ws_reconnect_backoff_sec: [5, 10, 20, 60]
+  backup_rsi_interval_sec: 8              # Период REST-подстраховки «застывших» символов
+  backup_stale_symbol_sec: 25            # Символ без WS дольше N сек → подтянуть kline по REST
+  backup_rest_concurrency: 3
+  backup_batch_size: 80                  # Макс. символов за один цикл backup
+  watchdog_interval_sec: 10
+  watchdog_warn_after_sec: 25             # Лог ERROR если нет WS-трафика (stall сам переподключит)
+  heartbeat_interval_sec: 60
+  heartbeat_file: "/tmp/mexc_scanner_heartbeat"   # Для Docker healthcheck
+  time_sync_interval_sec: 300             # Сверка времени с MEXC REST
+  rest_circuit_fail_threshold: 8          # Ошибок REST за окно → пауза
+  rest_circuit_window_sec: 60
+  rest_circuit_open_sec: 45
+  log_dir: "logs"
+  log_file_max_mb: 10
+  log_file_backup_count: 5
+  telegram_send_retries: 3
+  telegram_retry_base_delay_sec: 1.5
 
 mexc:
   rest_base: "https://api.mexc.com"

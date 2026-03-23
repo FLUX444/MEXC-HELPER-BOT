@@ -7,15 +7,15 @@ telegram:
   # --- Маркет-муверы: канал, куда слать сводки и новые предложения со ссылками на пары ---
   # Вставь свой ID канала (например -1003829455006). Пусто = отключено.
   # Узнать ID: переслать любое сообщение из канала боту @getidsbot
-  market_movers_chat_id: ""
+  market_movers_chat_id: "-1003829455006"
 
 mexc:
   api_key: ""        # Опционально, для сканера не нужен
   secret_key: ""     # Опционально
 
-# БД: use_redis true — Redis по url; false — локальный SQLite на ПК.
-# При use_redis true и redis_url localhost:6379 бот при старте сам попытается поднять Redis в Docker (docker start redis или docker run ...).
+# БД: при require_redis: true в settings.yml нужен Redis (рекомендуется для продакшна).
+# При use_redis true и redis_url localhost:6379 бот при старте сам попытается поднять Redis в Docker.
 db:
-  use_redis: false          # true = Redis (укажи redis_url), false = SQLite
+  use_redis: true
   redis_url: "redis://localhost:6379/0"
   sqlite_path: "data/scanner.db"

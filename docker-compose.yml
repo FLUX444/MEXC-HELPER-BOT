@@ -18,9 +18,21 @@ services:
         condition: service_healthy
     volumes:
       - ./config:/app/config
+      - scanner_logs:/app/logs
     environment:
       - REDIS_URL=redis://redis:6379/0
-    restart: unless-stopped
+    restart: always
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import os,time;p='/tmp/mexc_scanner_heartbeat';import sys;sys.exit(0 if os.path.isfile(p) and time.time()-os.path.getmtime(p)<120 else 1)\"",
+        ]
+      interval: 30s
+      timeout: 15s
+      retries: 4
+      start_period: 120s
 
 volumes:
   redis_data:
+  scanner_logs:
