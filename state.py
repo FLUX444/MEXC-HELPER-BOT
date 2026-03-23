@@ -55,22 +55,38 @@ async def _try_start_redis_docker() -> None:
 
 @dataclass
 class SymbolState:
-    """State for one symbol: last 24 closed closes + current close + alert flag."""
+    """Последние закрытые close + формирующаяся свеча; состояние RSI Уайлдера (как MEXC)."""
     symbol: str
     closed_closes: list[float] = field(default_factory=list)  # len <= RSI_PERIOD, oldest first
     current_close: float = 0.0
     candle_start_time: int = 0  # seconds
     alert_sent: bool = False
+    # После последнего полного закрытия (до текущей открытой свечи)
+    avg_gain_w: float = 0.0
+    avg_loss_w: float = 0.0
+    wilder_ready: bool = False
 
     def closes_for_rsi(self) -> list[float]:
-        """24 closed + current (order: oldest .. newest)."""
+        """Для отладки: 24 closed + current (не используется для расчёта — см. Wilder)."""
         out = list(self.closed_closes)[-RSI_PERIOD:]
         if self.current_close and (not out or out[-1] != self.current_close):
             out.append(self.current_close)
         return out
 
     def roll_to_new_candle(self, new_close: float, new_candle_start: int) -> None:
-        """Move current close into history, set new candle, reset alert_sent."""
+        """Закрыть свечу: закоммитить дельту в Уайлдер, затем сдвинуть буфер."""
+        if (
+            self.wilder_ready
+            and self.closed_closes
+            and self.current_close
+            and self.candle_start_time
+        ):
+            prev_last = self.closed_closes[-1]
+            d = self.current_close - prev_last
+            g = max(d, 0.0)
+            l = max(-d, 0.0)
+            self.avg_gain_w = (self.avg_gain_w * (RSI_PERIOD - 1) + g) / RSI_PERIOD
+            self.avg_loss_w = (self.avg_loss_w * (RSI_PERIOD - 1) + l) / RSI_PERIOD
         if self.current_close and self.candle_start_time:
             self.closed_closes.append(self.current_close)
             if len(self.closed_closes) > RSI_PERIOD:
@@ -140,9 +156,15 @@ class StateStore:
             self._states[key] = SymbolState(symbol=key)
         return self._states[key]
 
-    def init_symbol(self, key: str, closed_closes: list[float], candle_start: int, current_close: float):
+    def init_symbol(self, key: str, full_closed_closes: list[float], candle_start: int, current_close: float):
+        """full_closed_closes — все полностью закрытые свечи (oldest first), без текущей."""
+        from indicators import wilder_process_closed_closes
+
         s = self.get_or_create(key)
-        s.closed_closes = list(closed_closes)[-RSI_PERIOD:]
+        fc = list(full_closed_closes)
+        s.avg_gain_w, s.avg_loss_w = wilder_process_closed_closes(fc, RSI_PERIOD)
+        s.wilder_ready = len(fc) >= RSI_PERIOD + 1
+        s.closed_closes = fc[-RSI_PERIOD:]
         s.candle_start_time = candle_start
         s.current_close = current_close
         s.alert_sent = False

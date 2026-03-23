@@ -1,11 +1,15 @@
 """
-Сканер RSI3(24) и маркет-муверы (асинхронно).
-- Только 4H: RSI по текущей (открытой) свече. Сигнал строго если RSI3(24) >= 90.
-- Продакшн: WS stall + backoff, REST backup по «застывшим» символам, SETNX-антидубль,
-  watchdog, heartbeat-файл, ротация логов, circuit breaker на REST (mexc_client).
+Сканер RSI3(24) на 4H (открытая свеча, Уайлдер как MEXC).
+Продакшн: WS stall + backoff, REST backup, SETNX-антидубли, watchdog, heartbeat, логи, circuit breaker.
 
-- PRE-ALERT: RSI в [rsi_prealert_min .. main) — 1 раз на свечу, Redis prealert:{symbol}:{candle_open}, TTL 4 ч.
-- При require_redis: true нужен рабочий Redis (SETNX main + prealert).
+Условия уведомлений (единственные пути в Telegram):
+  MAIN:  wilder_ready, прошло >= min_alert_delay_4h_sec с открытия свечи, RSI >= rsi_threshold_4h,
+         try_claim_alert (Redis rsi_alert:state_key:candle) — иначе не шлём.
+  PRE:   та же задержка свечи; RSI < main; RSI >= rsi_prealert_min; по свече ещё не было main;
+         try_claim_prealert (prealert:symbol:candle), TTL 4 ч — один раз на свечу.
+  При RSI >= main ветка PRE не выполняется (return до неё).
+
+require_redis: true — нужен Redis для SETNX.
 """
 from __future__ import annotations
 
@@ -29,13 +33,6 @@ from config import (
     LOG_FILE_BACKUP_COUNT,
     LOG_FILE_MAX_MB,
     LOG_DIR,
-    MARKET_MOVERS_ALERT_DELAY_SEC,
-    MARKET_MOVERS_CHAT_ID,
-    MARKET_MOVERS_INTERVAL_SEC,
-    MARKET_MOVERS_MAX_PER_CYCLE,
-    MARKET_MOVERS_MIN_RISE_PCT,
-    MARKET_MOVERS_NEW_COOLDOWN_SEC,
-    MARKET_MOVERS_TOP_N,
     MIN_ALERT_DELAY_4H_SEC,
     MEXC_KLINE_DELAY,
     REDIS_URL,
@@ -49,17 +46,16 @@ from config import (
     WATCHDOG_WARN_AFTER_SEC,
     WS_STALL_TIMEOUT_SEC,
 )
-from indicators import rsi
+from indicators import wilder_rsi_for_forming_candle
 from mexc_client import (
     fetch_contract_list,
     fetch_klines,
     fetch_klines_batch,
     fetch_server_time,
     run_ws_kline_stream,
-    run_ws_ticker_stream,
 )
 from state import StateStore
-from telegram_notify import send_market_mover_alert, send_prealert, send_signal, send_startup_message
+from telegram_notify import send_prealert, send_signal, send_startup_message
 
 logger = logging.getLogger(__name__)
 
@@ -121,11 +117,17 @@ async def handle_kline_update(data: dict, symbol: str, ctx: dict) -> None:
             state.candle_start_time = t_sec
         state.current_close = close
 
-    closes = state.closes_for_rsi()
-    # Ровно 25 точек: 24 закрытых + текущая (как в ТЗ pre-alert / main)
-    if len(closes) != RSI_PERIOD + 1:
+    # RSI Уайлдер (как на MEXC), не SMA по 24 дельтам
+    if not state.wilder_ready or not state.closed_closes:
         return
-    rsi_val = rsi(closes, RSI_PERIOD)
+    last_closed = state.closed_closes[-1]
+    rsi_val = wilder_rsi_for_forming_candle(
+        state.avg_gain_w,
+        state.avg_loss_w,
+        last_closed,
+        state.current_close,
+        RSI_PERIOD,
+    )
     if rsi_val is None:
         return
     now_sec = int(time.time())
@@ -207,7 +209,8 @@ async def bootstrap_symbols_for_tf(
         if not klines:
             continue
         closes = [float(k["c"]) for k in klines]
-        if len(closes) < RSI_PERIOD:
+        # Нужно ≥ period+1 закрытых + 1 формирующаяся (итого period+2 свечей в ответе)
+        if len(closes) < RSI_PERIOD + 2:
             continue
         last = klines[-1]
         t_sec = int(last["t"])
@@ -287,22 +290,16 @@ async def time_sync_loop(session: aiohttp.ClientSession) -> None:
             logger.warning("TIME SYNC failed: %s", e)
 
 
-async def watchdog_loop(health_kline: dict[str, Any], health_ticker: dict[str, Any] | None) -> None:
+async def watchdog_loop(health_kline: dict[str, Any]) -> None:
     while True:
         await asyncio.sleep(WATCHDOG_INTERVAL_SEC)
         now = time.monotonic()
-        checks = [("kline_4h", health_kline)]
-        if health_ticker is not None:
-            checks.append(("tickers", health_ticker))
-        for name, h in checks:
-            last = h.get("last_message_mono")
-            if last is None:
-                continue
+        last = health_kline.get("last_message_mono")
+        if last is not None:
             age = now - last
             if age > WATCHDOG_WARN_AFTER_SEC:
                 logger.error(
-                    "WATCHDOG: %s — нет WS-трафика %.0f с (внутренний stall-timeout должен переподключить)",
-                    name,
+                    "WATCHDOG: kline_4h — нет WS-трафика %.0f с (stall-timeout переподключит WS)",
                     age,
                 )
 
@@ -338,9 +335,6 @@ async def main() -> None:
     asyncio.create_task(run_bot_polling(store))
 
     health_kline: dict[str, Any] = {"last_message_mono": None}
-    health_ticker: dict[str, Any] | None = (
-        {"last_message_mono": None} if MARKET_MOVERS_CHAT_ID else None
-    )
 
     async with aiohttp.ClientSession() as session:
         symbols = await fetch_contract_list(session)
@@ -378,97 +372,16 @@ async def main() -> None:
         tasks.append(asyncio.create_task(backup_rsi_loop(session, symbols, ctx_4h)))
         tasks.append(asyncio.create_task(heartbeat_loop()))
         tasks.append(asyncio.create_task(time_sync_loop(session)))
-        tasks.append(asyncio.create_task(watchdog_loop(health_kline, health_ticker)))
+        tasks.append(asyncio.create_task(watchdog_loop(health_kline)))
 
         logger.info(
-            "RSI 4H: RSI3(24) ≥ %.0f, %d пар; backup REST каждые %.0fs; stall WS %.0fs",
+            "RSI 4H: main ≥ %.0f, pre ≥ %.0f; %d пар; backup REST %.0fs; stall WS %.0fs",
             RSI_THRESHOLD_4H,
+            RSI_PREALERT_MIN,
             len(symbols),
             BACKUP_RSI_INTERVAL_SEC,
             WS_STALL_TIMEOUT_SEC,
         )
-
-        ticker_store: dict[str, dict] = {}
-        mover_new_last_sent: dict[str, float] = {}
-        previous_top_symbols: set[str] = set()
-        min_rise = MARKET_MOVERS_MIN_RISE_PCT / 100.0
-
-        async def on_tickers(data_list: list, ctx: dict) -> None:
-            for item in data_list:
-                if isinstance(item, dict) and item.get("symbol"):
-                    ticker_store[item["symbol"]] = item
-
-        async def market_movers_loop() -> None:
-            nonlocal previous_top_symbols
-            while True:
-                await asyncio.sleep(MARKET_MOVERS_INTERVAL_SEC)
-                try:
-                    if not MARKET_MOVERS_CHAT_ID or not ticker_store:
-                        continue
-                    candidates = [
-                        (sym, t)
-                        for sym, t in ticker_store.items()
-                        if sym.endswith("_USDT")
-                        and (t.get("riseFallRate") or 0) >= min_rise
-                        and (t.get("volume24") or 0) > 0
-                    ]
-                    candidates.sort(key=lambda x: float(x[1].get("volume24") or 0), reverse=True)
-                    top = candidates[:MARKET_MOVERS_TOP_N]
-                    if not top:
-                        continue
-                    current_top = {sym for sym, _ in top}
-                    if not previous_top_symbols:
-                        previous_top_symbols = current_top
-                        continue
-                    newly_in_list = current_top - previous_top_symbols
-                    previous_top_symbols = current_top
-
-                    now = time.time()
-                    sent_this_cycle = 0
-                    for sym, t in top:
-                        if sym not in newly_in_list:
-                            continue
-                        if sent_this_cycle >= MARKET_MOVERS_MAX_PER_CYCLE:
-                            break
-                        last_sent = mover_new_last_sent.get(sym, 0)
-                        if now - last_sent < MARKET_MOVERS_NEW_COOLDOWN_SEC:
-                            continue
-                        vol24 = float(t.get("volume24") or 0)
-                        rise_pct = float(t.get("riseFallRate") or 0) * 100
-                        price = float(t.get("lastPrice") or t.get("fairPrice") or 0)
-                        ok = await send_market_mover_alert(sym, rise_pct, vol24, price)
-                        if ok:
-                            mover_new_last_sent[sym] = now
-                            sent_this_cycle += 1
-                            logger.info(
-                                "Market mover new alert: %s +%.2f%% (появился в списке)",
-                                sym,
-                                rise_pct,
-                            )
-                            await asyncio.sleep(MARKET_MOVERS_ALERT_DELAY_SEC)
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    logger.exception("market_movers_loop error; continue")
-                    await asyncio.sleep(5)
-
-        if MARKET_MOVERS_CHAT_ID:
-            logger.info(
-                "Маркет-муверы: канал %s",
-                MARKET_MOVERS_CHAT_ID,
-            )
-            tasks.append(
-                asyncio.create_task(
-                    run_ws_ticker_stream(
-                        on_tickers,
-                        ticker_store,
-                        health=health_ticker,
-                    )
-                )
-            )
-            tasks.append(asyncio.create_task(market_movers_loop()))
-        else:
-            logger.info("Маркет-муверы: отключены (telegram.market_movers_chat_id)")
 
         await asyncio.gather(*tasks)
 

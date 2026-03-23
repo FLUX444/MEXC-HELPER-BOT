@@ -64,11 +64,6 @@ _db_cfg = _keys.get("db") or {}
 
 TELEGRAM_BOT_TOKEN = (_telegram.get("bot_token") or "").strip() or os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = str(_telegram.get("chat_id") or "").strip() or os.environ.get("TELEGRAM_CHAT_ID", "")
-MARKET_MOVERS_CHAT_ID = (
-    str(_telegram.get("market_movers_chat_id") or "").strip()
-    or os.environ.get("TELEGRAM_MARKET_MOVERS_CHAT_ID", "")
-)
-
 # БД: use_redis true → Redis по redis_url, false → локальный SQLite по sqlite_path
 _use_redis = _db_cfg.get("use_redis")
 if isinstance(_use_redis, str):
@@ -105,13 +100,6 @@ MIN_ALERT_DELAY_1H_SEC = max(0, int(_scanner.get("min_alert_delay_1h_sec") or 30
 MIN_ALERT_DELAY_4H_SEC = max(0, int(_scanner.get("min_alert_delay_4h_sec") or 60))
 KLINE_HISTORY_COUNT = int(_scanner.get("kline_history_count") or 30)
 WS_PING_INTERVAL = int(_scanner.get("ws_ping_interval") or 15)
-MARKET_MOVERS_INTERVAL_SEC = int(_scanner.get("market_movers_interval_sec") or 120)
-MARKET_MOVERS_MIN_RISE_PCT = float(_scanner.get("market_movers_min_rise_pct") or 5.0)
-MARKET_MOVERS_TOP_N = int(_scanner.get("market_movers_top_n") or 25)
-MARKET_MOVERS_NEW_COOLDOWN_SEC = int(_scanner.get("market_movers_new_cooldown_sec") or 1800)
-MARKET_MOVERS_ALERT_DELAY_SEC = float(_scanner.get("market_movers_alert_delay_sec") or 4)
-MARKET_MOVERS_MAX_PER_CYCLE = int(_scanner.get("market_movers_max_per_cycle") or 5)
-
 # Продакшн: WS stall, backoff, backup RSI, circuit breaker, heartbeat
 def _float_list(key: str, default: list[float]) -> list[float]:
     raw = _scanner.get(key)

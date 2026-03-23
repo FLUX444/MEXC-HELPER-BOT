@@ -1,4 +1,4 @@
-"""Telegram notifications: RSI3(24) >= 90 (по закрытой свече), маркет-муверы. Тексты из config/messages.yml. Aiogram."""
+"""Telegram: уведомления RSI 4H (main + PRE-ALERT). Тексты из config/messages.yml. Aiogram."""
 from __future__ import annotations
 
 import asyncio
@@ -13,7 +13,6 @@ from aiogram.types import FSInputFile
 
 from config import (
     BASE_DIR,
-    MARKET_MOVERS_CHAT_ID,
     MESSAGES,
     RSI_PREALERT_MIN,
     TELEGRAM_BOT_TOKEN,
@@ -202,7 +201,7 @@ async def send_startup_message() -> bool:
         return False
     cfg = (MESSAGES or {}).get("startup") or {}
     text = cfg.get("text") or (
-        "✅ MEXC RSI Scanner запущен 24/7. 4H: PRE-ALERT 85+, сигнал ≥90. Redis. Маркет-муверы: «Рост цены и высокий объём»."
+        "✅ MEXC RSI Scanner запущен 24/7. Только 4H: PRE-ALERT 85+, сигнал ≥90. Redis."
     )
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
     header_path = _get_header_path()
@@ -350,83 +349,5 @@ async def send_test_signal() -> tuple[bool, str]:
     except Exception as e:
         logger.exception("Test signal failed: %s", e)
         return False, ""
-    finally:
-        await bot.session.close()
-
-
-def _market_mover_link(symbol: str) -> str:
-    """Ссылка на пару фьючерсов MEXC."""
-    return f"{MEXC_FUTURES_URL}{symbol}"
-
-
-async def send_market_mover_alert(symbol: str, rise_pct: float, volume24: float, price: float) -> bool:
-    """
-    Отправляет одно уведомление «новое предложение» маркет-муверов в канал — с ссылкой на пару.
-    """
-    chat_id = _parse_chat_id(MARKET_MOVERS_CHAT_ID or "")
-    if not TELEGRAM_BOT_TOKEN or not chat_id:
-        return False
-    display = symbol.replace("_", "")
-    link = _market_mover_link(symbol)
-    text = (
-        f"📈 <b>MARKET MOVER</b>\n\n"
-        f"Монета: <a href=\"{link}\">#{display} USDT</a> Бессрочный\n"
-        f"Рост: <b>+{rise_pct:.2f}%</b>\n\n"
-        f"Высокий объём торгов\n\n"
-        f"🔗 {link}"
-    )
-    from aiogram.enums import ParseMode
-
-    async with _telegram_send_lock:
-        for attempt in range(TELEGRAM_SEND_RETRIES):
-            bot = Bot(token=TELEGRAM_BOT_TOKEN)
-            try:
-                await bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
-                return True
-            except TelegramBadRequest as e:
-                if "chat not found" in (e.message or "").lower():
-                    _log_chat_not_found()
-                else:
-                    logger.warning("Market mover alert send failed: %s", e)
-                return False
-            except Exception as e:
-                logger.warning(
-                    "Market mover send attempt %d/%d: %s",
-                    attempt + 1,
-                    TELEGRAM_SEND_RETRIES,
-                    e,
-                )
-                if attempt + 1 < TELEGRAM_SEND_RETRIES:
-                    await asyncio.sleep(TELEGRAM_RETRY_BASE_DELAY_SEC * (attempt + 1))
-            finally:
-                await bot.session.close()
-    return False
-
-
-async def send_market_movers(movers_lines: list[str]) -> bool:
-    """
-    Отправляет сводку «Маркет-муверы» (рост цены + высокий объём) в канал market_movers_chat_id.
-    movers_lines — список строк (каждая — одна пара/событие).
-    """
-    chat_id = _parse_chat_id(MARKET_MOVERS_CHAT_ID or "")
-    if not TELEGRAM_BOT_TOKEN or not chat_id or not movers_lines:
-        return False
-    text = "📊 <b>Маркет-муверы</b> (рост цены и высокий объём)\n\n" + "\n\n".join(movers_lines)
-    if len(text) > 4000:
-        text = text[:3997] + "..."
-    bot = Bot(token=TELEGRAM_BOT_TOKEN)
-    try:
-        from aiogram.enums import ParseMode
-        await bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
-        return True
-    except TelegramBadRequest as e:
-        if "chat not found" in (e.message or "").lower():
-            _log_chat_not_found()
-        else:
-            logger.warning("Market movers send failed: %s", e)
-        return False
-    except Exception as e:
-        logger.exception("Market movers send failed: %s", e)
-        return False
     finally:
         await bot.session.close()

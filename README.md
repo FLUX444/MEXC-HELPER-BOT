@@ -1,6 +1,6 @@
 # MEXC Futures RSI Scanner (Telegram Bot)
 
-Асинхронный бот для **реального времени**: сканирует все USDT Perpetual Futures на MEXC, считает **RSI(24)** на таймфрейме **1H** и отправляет уведомление в Telegram при **RSI ≥ 85** на текущей свече.
+Асинхронный бот: **4H**, RSI3(24) по **Уайлдеру** (как на MEXC), открытая свеча — **PRE-ALERT** при RSI ≥ 85 и ниже порога main, **основной сигнал** при RSI ≥ 90 (пороги в `settings.yml`). Маркет-муверы **не используются**.
 
 ## Особенности
 
@@ -37,8 +37,6 @@
 telegram:
   bot_token: "..."
   chat_id: "123456789"
-  # Канал для маркет-муверов (сводки + новые предложения со ссылками). Вставь свой ID или оставь пустым.
-  market_movers_chat_id: ""   # например -1003829455006; узнать: переслать пост из канала в @getidsbot
 
 db:
   use_redis: true        # true = Redis (при localhost бот поднимет Docker сам), false = SQLite
@@ -48,8 +46,6 @@ db:
 
 **Chat ID** узнать: напишите боту в Telegram, затем откройте  
 `https://api.telegram.org/bot<ВАШ_ТОКЕН>/getUpdates` — в ответе будет `message.chat.id`.  
-**ID канала** (для маркет-муверов): переслать любое сообщение из канала боту **@getidsbot**.
-
 ### Редактирование сообщений
 
 В **`config/messages.yml`** можно менять заголовок сигнала, подписи «Монета», «RSI (24)», «Условие», «Цена» и т.д. После сохранения файла изменения подхватятся при следующей отправке (при перезапуске бота).
@@ -169,7 +165,7 @@ sudo systemctl start mexc-scanner
    ssh root@ТВОЙ_СЕРВЕР "cd /root/programms/MEXC && git pull && sudo systemctl restart mexc-scanner && echo OK"
    ```
 
-Файлы `config/keys.yml` и папка `data/` в Git не попадают (см. `.gitignore`), поэтому на сервере они не перезатрутся при `git pull`. **Если в репозитории добавили новый ключ** (например `market_movers_chat_id`) в `keys.example.yml`, его нужно вручную дописать в свой `config/keys.yml` на сервере и на ПК.
+Файлы `config/keys.yml` и папка `data/` в Git не попадают (см. `.gitignore`), поэтому на сервере они не перезатрутся при `git pull`. При появлении новых полей в `keys.example.yml` при необходимости допиши их в свой `config/keys.yml`.
 
 ---
 
