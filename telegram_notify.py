@@ -81,7 +81,8 @@ def _get_chat_id() -> int | str | None:
 
 
 def _fmt_utc(ts_sec: int) -> str:
-    return datetime.fromtimestamp(ts_sec, tz=timezone.utc).strftime("%H:%M UTC")
+    """Только время; суффикс «UTC» добавляется в шаблоне один раз (без «UTC UTC»)."""
+    return datetime.fromtimestamp(ts_sec, tz=timezone.utc).strftime("%H:%M")
 
 
 def _fmt_elapsed(sec: int) -> str:
@@ -158,7 +159,7 @@ def build_prealert_message(
     """Формат PRE-ALERT по ТЗ (диапазон 85 .. < main)."""
     cfg = _prealert_cfg()
     title = cfg.get("title") or "⚠️ RSI PRE-ALERT (4H)"
-    rsi_label = cfg.get("rsi_label") or "RSI (24)"
+    rsi_label = cfg.get("rsi_label") or "RSI3(24)"
     range_label = cfg.get("range_label") or "Диапазон"
     price_suffix = cfg.get("price_suffix") or "USDT"
     candle_label = cfg.get("candle_label") or "Свеча"
@@ -201,7 +202,7 @@ async def send_startup_message() -> bool:
         return False
     cfg = (MESSAGES or {}).get("startup") or {}
     text = cfg.get("text") or (
-        "✅ MEXC RSI Scanner запущен 24/7. Только 4H: PRE-ALERT 85+, сигнал ≥90. Redis."
+        "✅ MEXC RSI Scanner запущен 24/7. 4H: PRE-ALERT 85+, основной сигнал ≥90."
     )
     bot = Bot(token=TELEGRAM_BOT_TOKEN)
     header_path = _get_header_path()

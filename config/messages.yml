@@ -11,7 +11,7 @@ rsi_signal:
 
 rsi_prealert:
   title: "⚠️ RSI PRE-ALERT (4H)"
-  rsi_label: "RSI (24)"
+  rsi_label: "RSI3(24)"
   range_label: "Диапазон"
   price_suffix: "USDT"
   candle_label: "Свеча"
@@ -19,11 +19,11 @@ rsi_prealert:
 
 # Сообщение при старте бота (если chat_id задан)
 startup:
-  text: "✅ MEXC RSI Scanner запущен 24/7.\n\n📊 Только 4H, открытая свеча: PRE-ALERT при RSI 85–90, основной сигнал при RSI ≥ 90.\n💾 Redis обязателен (антидубли).\n\nУведомления приходят сюда."
+  text: "✅ MEXC RSI Scanner запущен 24/7.\n\n📊 4H, открытая свеча: PRE-ALERT при RSI 85–90, основной сигнал при RSI ≥ 90.\n\nУведомления приходят сюда."
 
 # Приветствие по /start (шапка и кнопки)
 welcome:
-  text: "👋 Добро пожаловать!\n\n📊 Только 4H: PRE-ALERT (RSI 85+), сигнал при RSI ≥ 90. Нужен Redis.\n\n🔔 Кнопки ниже — последние уведомления и БД."
+  text: "👋 Добро пожаловать!\n\n📊 4H: PRE-ALERT (RSI 85+), основной сигнал при RSI ≥ 90.\n\n🔔 Кнопки ниже — последние уведомления и БД."
   # Шапка: положи файл header.png / header.jpg / header.webp в папку assets/ — он подставится автоматически.
   # Либо укажи URL картинки здесь (оставь пустым, если используешь файл из assets/).
   header_image_url: ""

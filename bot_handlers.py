@@ -184,7 +184,7 @@ def _get_welcome_text() -> str:
     cfg = (MESSAGES or {}).get("welcome") or {}
     return cfg.get("text") or (
         "👋 Добро пожаловать!\n\n"
-        "📊 Только 4H: PRE-ALERT (RSI 85+), сигнал ≥ 90. Redis.\n\n"
+        "📊 4H: PRE-ALERT (RSI 85+), основной сигнал ≥ 90.\n\n"
         "🔔 Нажми на кнопки ниже — последние уведомления и просмотр БД."
     )
 

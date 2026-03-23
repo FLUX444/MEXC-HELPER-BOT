@@ -140,6 +140,26 @@ async def fetch_klines(
     return result
 
 
+async def fetch_symbol_ticker_last_price(session: aiohttp.ClientSession, symbol: str) -> float:
+    """REST: текущая цена lastPrice по символу (для backup внутри свечи)."""
+    await _REST_BREAKER.before_call()
+    url = f"{MEXC_REST_BASE}/api/v1/contract/ticker"
+    params = {"symbol": symbol}
+    try:
+        async with session.get(url, params=params) as r:
+            r.raise_for_status()
+            raw = await r.json()
+        if not raw.get("success") or raw.get("code") != 0:
+            raise RuntimeError(f"MEXC ticker error for {symbol}: {raw}")
+        data = raw.get("data") or {}
+        last = data.get("lastPrice") or data.get("fairPrice") or data.get("indexPrice")
+        return float(last)
+    except Exception as e:
+        await _REST_BREAKER.on_failure()
+        raise e
+    _REST_BREAKER.on_success()
+
+
 async def fetch_klines_batch(
     session: aiohttp.ClientSession,
     symbols: list[str],

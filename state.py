@@ -156,8 +156,13 @@ class StateStore:
             self._states[key] = SymbolState(symbol=key)
         return self._states[key]
 
-    def init_symbol(self, key: str, full_closed_closes: list[float], candle_start: int, current_close: float):
-        """full_closed_closes — все полностью закрытые свечи (oldest first), без текущей."""
+    def init_symbol(self, key: str, full_closed_closes: list[float]):
+        """Seed RSI Уайлдера по полностью закрытым свечам (oldest first).
+
+        После init_symbol:
+        - avg_gain_w/avg_loss_w готовы для последней закрытой свечи (последний элемент full_closed_closes)
+        - candle_start_time=0/current_close=0 ждут первого WS тика текущей (формирующейся) свечи
+        """
         from indicators import wilder_process_closed_closes
 
         s = self.get_or_create(key)
@@ -165,8 +170,8 @@ class StateStore:
         s.avg_gain_w, s.avg_loss_w = wilder_process_closed_closes(fc, RSI_PERIOD)
         s.wilder_ready = len(fc) >= RSI_PERIOD + 1
         s.closed_closes = fc[-RSI_PERIOD:]
-        s.candle_start_time = candle_start
-        s.current_close = current_close
+        s.candle_start_time = 0
+        s.current_close = 0.0
         s.alert_sent = False
 
     async def get_alert_sent(self, symbol: str, candle_start: int) -> bool:

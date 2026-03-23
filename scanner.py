@@ -52,6 +52,7 @@ from mexc_client import (
     fetch_klines,
     fetch_klines_batch,
     fetch_server_time,
+    fetch_symbol_ticker_last_price,
     run_ws_kline_stream,
 )
 from state import StateStore
@@ -135,6 +136,9 @@ async def handle_kline_update(data: dict, symbol: str, ctx: dict) -> None:
     min_delay = MIN_ALERT_DELAY_4H_SEC
     if elapsed < min_delay:
         return
+    # Если WS сильно отвалился и мы считаем по уже "просроченной" свече — не посылаем.
+    if elapsed > (4 * 60 * 60 + 120):
+        return
 
     if rsi_val >= threshold:
         acquired = await store.try_claim_alert(state_key, state.candle_start_time)
@@ -153,7 +157,7 @@ async def handle_kline_update(data: dict, symbol: str, ctx: dict) -> None:
                 logger.info("RSI scan %s: обработано %d обновлений свечей", ctx["tf_name"], ctx["log_n"])
         return
 
-    if rsi_val >= RSI_PREALERT_MIN:
+    if rsi_val >= RSI_PREALERT_MIN and rsi_val < threshold:
         if await store.get_alert_sent(state_key, state.candle_start_time):
             pass
         else:
@@ -209,20 +213,26 @@ async def bootstrap_symbols_for_tf(
         if not klines:
             continue
         closes = [float(k["c"]) for k in klines]
-        # Нужно ≥ period+1 закрытых + 1 формирующаяся (итого period+2 свечей в ответе)
-        if len(closes) < RSI_PERIOD + 2:
+        if len(closes) < RSI_PERIOD + 1:
             continue
-        last = klines[-1]
-        t_sec = int(last["t"])
         state_key = f"{sym}@{tf_name}"
-        store.init_symbol(state_key, closes[:-1], t_sec, float(last["c"]))
+        # Засеиваем RSI Уайлдера по последним полностью закрытым свечам.
+        store.init_symbol(state_key, closes)
         inited += 1
     logger.info("Bootstrapped %d symbols for %s", inited, tf_name)
 
 
 async def backup_rsi_loop(session: aiohttp.ClientSession, symbols: list[str], ctx_4h: dict) -> None:
-    """REST-подстраховка: символы без WS дольше BACKUP_STALE_SYMBOL_SEC."""
+    """REST-подстраховка: пересчитать RSI по текущей WS-открытой свече, не сдвигая state.
+
+    Важно: REST kline НЕ используем для forming-candle (они только closed). Используем только lastPrice.
+    """
+    store: StateStore = ctx_4h["store"]
+    tf_name: str = ctx_4h["tf_name"]
+    threshold: float = ctx_4h["threshold"]
     last_mono: dict[str, float] = ctx_4h["last_symbol_ws_mono"]
+
+    sem = asyncio.Semaphore(BACKUP_REST_CONCURRENCY)
     while True:
         try:
             await asyncio.sleep(BACKUP_RSI_INTERVAL_SEC)
@@ -232,27 +242,70 @@ async def backup_rsi_loop(session: aiohttp.ClientSession, symbols: list[str], ct
             batch = stale[:BACKUP_BATCH_SIZE]
             if not batch:
                 continue
-            sem = asyncio.Semaphore(BACKUP_REST_CONCURRENCY)
 
             async def one(sym: str) -> None:
                 async with sem:
                     await asyncio.sleep(MEXC_KLINE_DELAY)
+                    state_key = f"{sym}@{tf_name}"
+                    state = store.get_or_create(state_key)
+                    # Если WS ещё не успел проставить candle_start_time — не посылаем.
+                    if not state.wilder_ready or not state.closed_closes or not state.candle_start_time:
+                        return
+                    now_sec = int(time.time())
+                    elapsed = now_sec - state.candle_start_time
+                    if elapsed < MIN_ALERT_DELAY_4H_SEC:
+                        return
+            if elapsed > (4 * 60 * 60 + 120):
+                return
+
                     try:
-                        klines = await fetch_klines(session, sym, interval="Hour4", count=5)
-                        if not klines:
-                            return
-                        last = klines[-1]
-                        await handle_kline_update(
-                            {"t": int(last["t"]), "c": float(last["c"])},
-                            sym,
-                            ctx_4h,
-                        )
-                        last_mono[sym] = time.monotonic()
+                        last_price = await fetch_symbol_ticker_last_price(session, sym)
                     except Exception as e:
-                        logger.debug("REST backup %s: %s", sym, e)
+                        logger.debug("REST backup ticker %s: %s", sym, e)
+                        return
+
+                    last_closed_close = state.closed_closes[-1]
+                    rsi_val = wilder_rsi_for_forming_candle(
+                        state.avg_gain_w,
+                        state.avg_loss_w,
+                        last_closed_close,
+                        last_price,
+                        RSI_PERIOD,
+                    )
+                    if rsi_val is None:
+                        return
+
+                    if rsi_val >= threshold:
+                        acquired = await store.try_claim_alert(state_key, state.candle_start_time)
+                        if not acquired:
+                            return
+                        ok = await send_signal(sym, rsi_val, last_price, state.candle_start_time, tf_name=tf_name)
+                        if ok:
+                            await store.push_last_signal(sym, rsi_val, last_price, state.candle_start_time, tf_name=tf_name)
+                        else:
+                            await store.release_alert_claim(state_key, state.candle_start_time)
+                        return
+
+                    # PRE-ALERT только когда RSI в [85; 89.99]
+                    if rsi_val >= RSI_PREALERT_MIN and rsi_val < threshold:
+                        if await store.get_alert_sent(state_key, state.candle_start_time):
+                            return
+                        acquired = await store.try_claim_prealert(sym, state.candle_start_time)
+                        if not acquired:
+                            return
+                        ok = await send_prealert(
+                            sym,
+                            rsi_val,
+                            last_price,
+                            state.candle_start_time,
+                            elapsed,
+                            tf_name=tf_name,
+                            main_threshold=threshold,
+                        )
+                        if not ok:
+                            await store.release_prealert_claim(sym, state.candle_start_time)
 
             await asyncio.gather(*(one(s) for s in batch))
-            logger.info("REST backup: подтянуто %d символов (застывшие WS)", len(batch))
         except asyncio.CancelledError:
             raise
         except Exception:
