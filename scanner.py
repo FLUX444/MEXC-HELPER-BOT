@@ -255,8 +255,8 @@ async def backup_rsi_loop(session: aiohttp.ClientSession, symbols: list[str], ct
                     elapsed = now_sec - state.candle_start_time
                     if elapsed < MIN_ALERT_DELAY_4H_SEC:
                         return
-            if elapsed > (4 * 60 * 60 + 120):
-                return
+                    if elapsed > (4 * 60 * 60 + 120):
+                        return
 
                     try:
                         last_price = await fetch_symbol_ticker_last_price(session, sym)
